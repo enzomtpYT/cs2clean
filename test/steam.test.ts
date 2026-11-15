@@ -65,10 +65,34 @@ describe("picking the match from Steam's players list", () => {
   it("looks for a mode's other players, but never more than the lobby looks up", () => {
     expect(othersToFind("competitive")).toBe(9);   // also Premier
     expect(othersToFind("scrimcomp2v2")).toBe(3);  // Wingman
+    expect(othersToFind("retakes")).toBe(7);       // 4v3 Retakes
+    expect(expectedOthers("retakes")).toBe(7);
     expect(othersToFind("casual")).toBe(9);        // 19 others, but only 10 players are looked up
     expect(othersToFind("deathmatch")).toBe(9);
     expect(othersToFind(null)).toBe(9);            // until the game says which mode it is
     expect(othersToFind(undefined)).toBe(9);
+  });
+
+  it("limits matchStart backfill to 60s before the match started", () => {
+    const start = now - 30;
+    const entries = [
+      E(1, start + 5),   // current match
+      E(2, start - 45),  // within 60s backfill window
+      E(3, start - 90),  // too old for 60s backfill window
+    ];
+    const r = pickMatchPlayers(entries, { now, localSteamId: ME, matchStart: start });
+    expect(r.players.map((p) => p.name).sort()).toEqual(["p1", "p2"]);
+    expect(r.others.map((p) => p.name)).toEqual(["p3"]);
+  });
+
+  it("prefers the newest group in rotating modes (preferNewest) even when an older group is larger", () => {
+    const start = now - 20;
+    const entries = [
+      ...[1, 2, 3, 4, 5, 6, 7].map((n) => E(n, start - 90)), // previous Retakes game (7 players)
+      ...[20, 21, 22, 23, 24, 25].map((n) => E(n, start + 5)), // current Retakes game (6 players)
+    ];
+    const r = pickMatchPlayers(entries, { now, localSteamId: ME, matchStart: start, expectedOthers: 7, preferNewest: true });
+    expect(r.players.map((p) => p.name).sort()).toEqual(["p20", "p21", "p22", "p23", "p24", "p25"]);
   });
 });
 
@@ -185,6 +209,21 @@ describe("SteamSource", () => {
     list = [1, 2].map((n) => E(n, t() - 1)).concat(E(3, t() - 30 * 60));
     await vi.advanceTimersByTimeAsync(1_100);
     expect(matches.at(-1)!.players.map((p) => p.name)).toEqual(["Nova", "p1", "p2", "p3"]);
+    src.stop();
+  });
+
+  it("replaces stale players on rotating modes like retakes instead of accumulating them", async () => {
+    const t = () => Math.floor(Date.now() / 1000);
+    let list = [1, 2, 3].map((n) => E(n, t() - 5));
+    const { src, push, matches } = make(() => list);
+    src.start();
+    push({ map: "de_dust2", mode: "retakes", phase: "live" });
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(matches.at(-1)!.players.map((p) => p.name)).toEqual(["Nova", "p1", "p2", "p3"]);
+
+    list = [4, 5].map((n) => E(n, t() - 1));
+    await vi.advanceTimersByTimeAsync(1_100);
+    expect(matches.at(-1)!.players.map((p) => p.name)).toEqual(["Nova", "p4", "p5"]);
     src.stop();
   });
 

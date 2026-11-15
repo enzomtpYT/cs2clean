@@ -18,6 +18,8 @@ export interface PickOptions {
   minTime?: number | null;
   /** Other players to look for (see othersToFind: 9 in Competitive/Premier, 3 in Wingman). Unknown mode: 9. */
   expectedOthers?: number;
+  /** Prefer the newest group (with >= 2 players if any) over an older larger group (for rotating modes like Retakes). */
+  preferNewest?: boolean;
   /** Entries reported this close together (s) count as one group. */
   groupGapS?: number;
   /** Without a known match start, only look this far back (s). */
@@ -50,15 +52,23 @@ export function pickMatchPlayers(entries: CoplayEntry[], o: PickOptions): PickRe
   }
   if (groups.length === 0) return { players: [], others: [] };
 
-  // Biggest group wins; on a tie the newer one (a new match beats the previous one).
-  let best = groups[0];
-  for (const g of groups) if (g.length >= best.length) best = g;
+  let best: CoplayEntry[];
+  if (o.preferNewest) {
+    // Rotating/drop-in modes (Retakes, Casual, DM): pick the newest group (with >= 2 players if any)
+    // so a slightly larger previous lobby never beats the current match.
+    const multi = groups.filter((g) => g.length >= 2);
+    best = (multi.length > 0 ? multi : groups).at(-1)!;
+  } else {
+    // Biggest group wins; on a tie the newer one (a new match beats the previous one).
+    best = groups[0];
+    for (const g of groups) if (g.length >= best.length) best = g;
+  }
   // A group bigger than a match holds late reports too; the roster is the first ones reported.
   const players = best.slice(0, expected);
   // Steam sometimes re-reports a player later (seen on a real PC: 8 of 9 in the group, one apart).
   // Fill a short group with the entries closest in time, never ones from before this match's group.
   const start = best[0].time;
-  const floor = o.matchStart != null ? Math.max(o.matchStart - 180, start - 120) : start - 120;
+  const floor = o.matchStart != null ? Math.max(o.matchStart - 180, start - 60) : start - 60;
   const inGroup = new Set(players.map((p) => p.steamId));
   const fill = recent
     .filter((e) => !inGroup.has(e.steamId) && e.time >= floor)
@@ -72,6 +82,7 @@ export function pickMatchPlayers(entries: CoplayEntry[], o: PickOptions): PickRe
 export function expectedOthers(mode: string | null | undefined): number {
   const m = (mode ?? "").toLowerCase();
   if (m.includes("wingman") || m.includes("scrimcomp2v2")) return 3;
+  if (m.includes("retake")) return 7;
   if (m.includes("casual") || m.includes("deathmatch") || m.includes("armsrace")) return 19;
   return 9;
 }

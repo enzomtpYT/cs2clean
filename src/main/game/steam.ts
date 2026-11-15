@@ -387,6 +387,7 @@ export class SteamSource extends GameSource {
     this.processUp = up;
     if (up) this.matchStart = this.now;
     else {
+      this.lastMatchEnd = this.now;
       this.matchStart = null;
       this.groupStart = null;
       this.clearRoster();
@@ -428,6 +429,7 @@ export class SteamSource extends GameSource {
         matchStart: this.matchStart != null ? Math.floor(this.matchStart / 1000) : null,
         minTime: this.lastMatchEnd != null ? Math.floor(this.lastMatchEnd / 1000) : null,
         expectedOthers: others,
+        preferNewest: isRotatingMode(this.game?.mode),
       });
       if (this.inMap) {
         // Detect a new match group: significant time gap from the previous group, or all current players
@@ -444,10 +446,15 @@ export class SteamSource extends GameSource {
         }
         if (picked.players.length) this.groupStart = groupStart;
         if (picked.players.length) this.listed = true;
-        // Players stay for the whole match once seen, so a later scan can't drop one.
-        const byId = new Map(this.players.map((p) => [p.steamId, p]));
+        // Competitive/Premier/Wingman keep seen players for the whole match (so disconnects stay visible);
+        // drop-in/rotating modes (Retakes, Casual, Deathmatch, Arms Race) replace the roster each scan so
+        // players from previous games or people who left don't linger.
+        const prevNames = new Map(this.players.map((p) => [p.steamId, p.name]));
+        const byId = isRotatingMode(this.game?.mode)
+          ? new Map<string | null, RosterPlayer>()
+          : new Map(this.players.map((p) => [p.steamId, p]));
         for (const e of picked.players)
-          byId.set(e.steamId, { slot: 0, name: e.name ?? byId.get(e.steamId)?.name ?? "Unknown player", steamId: e.steamId, side: null, isLocal: false });
+          byId.set(e.steamId, { slot: 0, name: e.name ?? prevNames.get(e.steamId) ?? "Unknown player", steamId: e.steamId, side: null, isLocal: false });
         // Steam leaves friends out of its players list: top up a short list with friends in this match.
         const friends = pickFriends(res.friends ?? [], {
           map: this.game?.map ?? null, localPresence: res.localPresence,
@@ -612,4 +619,9 @@ export class SteamSource extends GameSource {
     if (!inMatch || (roster.length === 0 && manual.length === 0)) return { ...base, players: inMatch ? [] : manual };
     return { ...base, players: [...withMe, ...manual] };
   }
+}
+
+function isRotatingMode(mode: string | null | undefined): boolean {
+  const m = (mode ?? "").toLowerCase();
+  return m.includes("retake") || m.includes("casual") || m.includes("deathmatch") || m.includes("armsrace");
 }

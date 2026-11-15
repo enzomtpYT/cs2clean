@@ -136,8 +136,13 @@ function tokensEqual(a: unknown, b: string): boolean {
   return ab.length === bb.length && timingSafeEqual(ab, bb);
 }
 
-/** Listens on 127.0.0.1 only. Payloads without our token are ignored. */
-export function startGsiServer(token: string, onState: (s: GameState) => void, port = GSI_PORT): Server {
+/** Listens on 127.0.0.1 only. Payloads without our token are ignored. Retries briefly on EADDRINUSE (e.g. fast app restart). */
+export function startGsiServer(
+  token: string,
+  onState: (s: GameState) => void,
+  port = GSI_PORT,
+  onError?: (err: Error) => void,
+): Server {
   const server = createServer((req, res) => {
     if (req.method !== "POST" || req.url !== "/gsi") {
       res.writeHead(404).end();
@@ -163,7 +168,32 @@ export function startGsiServer(token: string, onState: (s: GameState) => void, p
     });
   });
   server.requestTimeout = 5_000;
-  server.on("error", (e) => console.warn("game state listener:", e.message));
+  let closed = false;
+  let retryTimer: NodeJS.Timeout | null = null;
+  const origClose = server.close.bind(server);
+  server.close = ((cb?: (err?: Error) => void) => {
+    closed = true;
+    if (retryTimer) {
+      clearTimeout(retryTimer);
+      retryTimer = null;
+    }
+    return origClose(cb);
+  }) as typeof server.close;
+
+  server.on("error", (e: NodeJS.ErrnoException) => {
+    console.warn("game state listener:", e.message);
+    if (e.code === "EADDRINUSE" && !closed) {
+      if (!retryTimer) {
+        retryTimer = setTimeout(() => {
+          retryTimer = null;
+          if (!closed) server.listen(port, "127.0.0.1");
+        }, 1_000);
+        retryTimer.unref?.();
+      }
+      return;
+    }
+    onError?.(e);
+  });
   server.listen(port, "127.0.0.1");
   return server;
 }

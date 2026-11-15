@@ -632,13 +632,55 @@ export class Controller extends EventEmitter<{ state: [AppState] }> {
   }
 
   private async lookup(steamIds: string[], onEarly?: (answers: LobbyAnswer[]) => void) {
-    const csrepPromise = this.fetchCsrepSafe(steamIds);
+    let csrepMap: Map<string, CsrepProfile> = new Map();
+    let faceitMap: Map<string, FaceitRankInfo> = new Map();
+    let earlyAnswers: LobbyAnswer[] | null = null;
+    let lobbyDone = false;
+    let faceitPromise: Promise<Map<string, FaceitRankInfo>> | null = null;
+
+    const applyEnrichment = (list: LobbyAnswer[]): LobbyAnswer[] =>
+      list.map((a) => {
+        let next = csrepMap.size > 0 && a.steamId ? enrichAnswerWithCsrep(a, csrepMap.get(a.steamId)) : a;
+        if (faceitMap.size > 0 && next.steamId) next = enrichAnswerWithFaceit(next, faceitMap.get(next.steamId));
+        return next;
+      });
+
+    const startFaceit = (answers: LobbyAnswer[]) => {
+      if (faceitPromise) return faceitPromise;
+      if (!this.faceit.apiKey?.trim()) {
+        faceitPromise = Promise.resolve(new Map());
+        return faceitPromise;
+      }
+      const missingFaceitIds = steamIds.filter((id) => {
+        const ans = answers.find((a) => a.steamId === id);
+        return !ans || ans.detail?.metrics.faceit == null;
+      });
+      faceitPromise = this.fetchFaceitSafe(missingFaceitIds).then((m) => {
+        faceitMap = m;
+        if (!lobbyDone && earlyAnswers && onEarly && m.size > 0) onEarly(applyEnrichment(earlyAnswers));
+        return m;
+      });
+      return faceitPromise;
+    };
+
+    const csrepPromise = this.fetchCsrepSafe(steamIds).then((m) => {
+      csrepMap = m;
+      if (!lobbyDone && earlyAnswers && onEarly && m.size > 0) onEarly(applyEnrichment(earlyAnswers));
+      return m;
+    });
+
     try {
-      const [rawAnswers, csrepMap] = await Promise.all([
+      const [rawAnswers] = await Promise.all([
         lookupLobby(this.leetify, steamIds, {
           concurrency: this.deps.leetifyConcurrency,
           scrape: this.deps.scrape,
-          onEarly,
+          onEarly: onEarly
+            ? (answers) => {
+              earlyAnswers = answers;
+              void startFaceit(answers);
+              onEarly(applyEnrichment(answers));
+            }
+            : undefined,
           onSource: (steamId, source) => {
             if (source) this.sources.set(steamId, source);
             else this.sources.delete(steamId);
@@ -649,20 +691,9 @@ export class Controller extends EventEmitter<{ state: [AppState] }> {
         }),
         csrepPromise,
       ]);
-      let answers = csrepMap.size === 0
-        ? rawAnswers
-        : rawAnswers.map((a) => enrichAnswerWithCsrep(a, a.steamId ? csrepMap.get(a.steamId) : undefined));
-
-      const missingFaceitIds = answers
-        .filter((a) => !a.transient && a.steamId && (a.detail?.metrics.faceit == null || a.detail?.metrics.faceitElo == null))
-        .map((a) => a.steamId!);
-      if (this.faceit.apiKey?.trim() && missingFaceitIds.length > 0) {
-        const faceitMap = await this.fetchFaceitSafe(missingFaceitIds);
-        if (faceitMap.size > 0) {
-          answers = answers.map((a) => enrichAnswerWithFaceit(a, a.steamId ? faceitMap.get(a.steamId) : undefined));
-        }
-      }
-      return answers;
+      lobbyDone = true;
+      await startFaceit(rawAnswers);
+      return applyEnrichment(rawAnswers);
     } catch (e) {
       // A missing or rejected key fails the same way every time: tell the lobby, which then waits for a new key (or a new match).
       if (e instanceof LeetifyError && e.kind === "invalid-key") throw new LookupBlocked(message(e));
@@ -691,8 +722,9 @@ function tierToEvidenceClass(tier: string | undefined): "NORMAL" | "ELEVATED" | 
     case "VERY_SUSPICIOUS": return "VERY_HIGH";
     case "SUSPICIOUS": return "HIGH";
     case "WATCH": return "ELEVATED";
-    case "UNKNOWN": return "INSUFFICIENT_DATA";
-    default: return "NORMAL";
+    case "TRUSTED":
+    case "NORMAL": return "NORMAL";
+    default: return "INSUFFICIENT_DATA";
   }
 }
 

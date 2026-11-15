@@ -258,6 +258,14 @@ describe("mergeCsrepReputation & toCsrepSummary", () => {
       confidence: 0.8,
       reasons: ["CSRep flagged (2)", "Low CS2 hours (95h on CSRep)", "Low CSRep trust (35%)"],
     });
+
+    // When Leetify has no profile (null), a rated CSRep trustScore (>= 50) maps to TRUSTED/NORMAL instead of UNKNOWN
+    expect(mergeCsrepReputation(null, { ...p, trustScore: 99, flagsCount: 0, cs2Hours: 1383 })).toEqual({
+      score: 99,
+      tier: "TRUSTED",
+      confidence: 0.7,
+      reasons: [],
+    });
   });
 });
 
@@ -367,6 +375,148 @@ describe("Controller CSRep FlareSolverr integration", () => {
 
     controller.clearFlaresolverrUrl();
     expect(controller.state.csrep.hasProxy).toBe(false);
+    controller.stop();
+  });
+
+  it("keeps INSUFFICIENT_DATA when neither Leetify nor CSRep has data (unrated CSRep profile)", async () => {
+    const unratedHtml = `
+      <html><body>
+        <h1>Sorry for what?</h1>
+        <button><span>0 Bans</span></button>
+        <button><span>0 Flags</span></button>
+        <div>Trust Score <span>—</span></div>
+        <div>Account Flags <span>100</span></div>
+        <div>Anomalies <span>100</span></div>
+      </body></html>
+    `;
+    const fetchImpl = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url === "http://localhost:8191/v1") {
+        return jsonResponse({
+          status: "ok",
+          solution: {
+            status: 200,
+            response: unratedHtml,
+            cookies: [{ name: "cf_clearance", value: "tok" }],
+            userAgent: "UA",
+          },
+        });
+      }
+      return jsonResponse({ error: "not found" }, 404);
+    });
+
+    const { source, emitMatch } = fakeSource();
+    const controller = new Controller({
+      version: "1.6.1",
+      source,
+      store: { load: () => ({ flaresolverrUrl: "http://localhost:8191/v1" }), save: () => {} },
+      overlay: { hotkey: "Shift+F2", detailHotkey: "F7", cycleHotkey: "F6", previousHotkey: "Shift+F6", mode: "none", visible: false, view: "lobby", focusSlot: null, siren: false },
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      scrape: async () => ({ profiles: new Map(), status: { state: "ready", problem: null, reason: null, detail: null } }),
+    });
+
+    controller.start();
+    emitMatch({
+      map: "de_dust2",
+      mode: "retakes",
+      phase: "warmup",
+      players: [{ slot: 1, name: "Sorry for what?", steamId: STEAM_A, isLocal: false, side: "CT" }],
+    });
+
+    await vi.waitFor(() => expect(controller.state.lobby.rows[0]?.status).toBe("ok"));
+    const row = controller.state.lobby.rows[0];
+    expect(row.classification).toBe("INSUFFICIENT_DATA");
+    expect(row.reputation).toBeNull();
+    controller.stop();
+  });
+
+  it("emits Leetify + CSRep results before a slow csst.at scrape finishes", async () => {
+    const csrepHtml = `
+      <html><body>
+        <h1>PlayerA</h1>
+        <button><span>0 Bans</span></button>
+        <button><span>0 Flags</span></button>
+        <div>Trust Score <span>99%</span></div>
+        <div>Account Flags <span>100</span></div>
+        <div>Anomalies <span>100</span></div>
+        <div>CS2 Hours <span>1383h</span></div>
+      </body></html>
+    `;
+    let resolveScrape!: (value: { profiles: Map<string, never>; status: { state: "ready"; problem: null; reason: null; detail: null } }) => void;
+    const scrapePromise = new Promise<{ profiles: Map<string, never>; status: { state: "ready"; problem: null; reason: null; detail: null } }>((resolve) => {
+      resolveScrape = resolve;
+    });
+
+    const fetchImpl = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url === "http://localhost:8191/v1") {
+        return jsonResponse({
+          status: "ok",
+          solution: {
+            status: 200,
+            response: csrepHtml,
+            cookies: [{ name: "cf_clearance", value: "tok" }],
+            userAgent: "UA",
+          },
+        });
+      }
+      if (url.includes("leetify.com") && url.includes(STEAM_A)) {
+        return jsonResponse({
+          name: "PlayerA",
+          steam64_id: STEAM_A,
+          total_matches: 40,
+          winrate: 0.5,
+          ranks: { leetify: 1.0, premier: 15000, faceit: 6 },
+          rating: { aim: 50, positioning: 50, utility: 50, clutch: 0.1, opening: 0.05 },
+          stats: {
+            preaim: 12,
+            reaction_time_ms: 550,
+            accuracy_head: 20,
+            spray_accuracy: 35,
+            accuracy_enemy_spotted: 34,
+            counter_strafing_good_shots_ratio: 80,
+            ct_opening_duel_success_percentage: 50,
+            t_opening_duel_success_percentage: 50,
+          },
+          bans: [],
+          recent_matches: [],
+        });
+      }
+      return jsonResponse({ error: "not found" }, 404);
+    });
+
+    const { source, emitMatch } = fakeSource();
+    const controller = new Controller({
+      version: "1.6.1",
+      source,
+      store: { load: () => ({ flaresolverrUrl: "http://localhost:8191/v1" }), save: () => {} },
+      overlay: { hotkey: "Shift+F2", detailHotkey: "F7", cycleHotkey: "F6", previousHotkey: "Shift+F6", mode: "none", visible: false, view: "lobby", focusSlot: null, siren: false },
+      lobby: { debounceMs: 0 },
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      scrape: () => scrapePromise,
+    });
+
+    controller.start();
+    emitMatch({
+      map: "de_mirage",
+      mode: "premier",
+      phase: "live",
+      players: [
+        { slot: 1, name: "PlayerA", steamId: STEAM_A, isLocal: false, side: "CT" },
+        { slot: 2, name: "PlayerB", steamId: "76561198000000002", isLocal: false, side: "T" },
+      ],
+    });
+
+    // While csst.at scrape is still pending for PlayerB, early Leetify + CSRep enrichment for PlayerA should already be visible.
+    await vi.waitFor(() => {
+      const row = controller.state.lobby.rows[0];
+      expect(row?.status).toBe("ok");
+      expect(row?.csrep?.trustScore).toBe(99);
+    }, { timeout: 3000 });
+
+    resolveScrape({ profiles: new Map(), status: { state: "ready", problem: null, reason: null, detail: null } });
+    await vi.waitFor(() => expect(controller.state.lobby.rows[1]?.status).toBe("ok"));
+    expect(controller.state.lobby.rows[0]?.csrep?.trustScore).toBe(99);
     controller.stop();
   });
 });

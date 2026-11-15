@@ -480,7 +480,15 @@ export function mergeCsrepReputation(base: PlayerReputation | null, csrep: Csrep
   let score = base?.score ?? null;
   let tier: ReputationTier = base?.tier ?? "UNKNOWN";
   let confidence = base?.confidence ?? 0;
+  let seededFromCsrep = false;
   const extra: string[] = [];
+
+  if ((!base || base.tier === "UNKNOWN") && csrep.trustScore !== null) {
+    score = Math.round(csrep.trustScore);
+    tier = scoreToTier(score);
+    confidence = Math.max(confidence, 0.7);
+    seededFromCsrep = true;
+  }
 
   if (csrep.bansCount > 0) {
     const penalty = Math.min(BAN_PENALTY_CAP, csrep.bansCount * BAN_PENALTY_PER_BAN);
@@ -499,7 +507,7 @@ export function mergeCsrepReputation(base: PlayerReputation | null, csrep: Csrep
   if (csrep.trustScore !== null && csrep.trustScore < 50) {
     extra.push(`Low CSRep trust (${Math.round(csrep.trustScore)}%)`);
   }
-  if (extra.length === 0) return base;
+  if (extra.length === 0 && !seededFromCsrep) return base;
 
   const existing = base?.reasons ?? [];
   const mergedReasons = [...existing, ...extra.filter((r) => !existing.includes(r))];
