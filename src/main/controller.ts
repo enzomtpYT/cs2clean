@@ -10,8 +10,10 @@ import { MAX_MANUAL } from "../shared/lobby-size";
 import { parseSteamInput } from "../shared/steam-id";
 import type { AppState, LobbyRow, MatchState } from "../shared/types";
 import type { GameSource } from "./game/source";
+import { CsrepClient, CsrepError, toCsrepSummary, type CsrepPlayer } from "./csrep";
 import { LeetifyClient, LeetifyError, lookupLobby, type DataSource, type LookupOptions } from "./leetify";
 import { LobbyService, LookupBlocked, type LobbyAnswer, type LobbyOptions } from "./lobby";
+import { mergeCsrepReputation } from "./reputation";
 import { validateSteamKey } from "./steam/friends";
 import { lookupPlayerName } from "./steam/player-name";
 import { resolveVanity } from "./steam/vanity";
@@ -22,6 +24,8 @@ export interface Settings {
   leetifyKey?: string | null;
   /** The user's Steam Web API key (https://steamcommunity.com/dev/apikey). */
   steamApiKey?: string | null;
+  /** The user's CSRep.GG API key (X-API-Key). */
+  csrepApiKey?: string | null;
   /** Siren when a HIGH player is found (default on). */
   siren?: boolean;
   /** Open Steam's friends list window when it is closed, to find friends in the match (default on). */
@@ -43,6 +47,8 @@ export interface ControllerDeps {
   envKey?: string | null;
   /** Steam Web API key from STEAM_API_KEY environment variable. */
   steamApiKey?: string | null;
+  /** CSRep.GG API key from CSREP_API_KEY environment variable. */
+  csrepApiKey?: string | null;
   overlay: AppState["overlay"];
   fetchImpl?: typeof fetch;
   lobby?: LobbyOptions;
@@ -60,6 +66,7 @@ export interface ControllerDeps {
 
 export class Controller extends EventEmitter<{ state: [AppState] }> {
   readonly leetify: LeetifyClient;
+  readonly csrep: CsrepClient;
   private lobby: LobbyService;
   /** Takes this controller's listeners off the game source; null while they aren't on it (before start(), after stop()). */
   private detachSource: (() => void) | null = null;
@@ -79,12 +86,15 @@ export class Controller extends EventEmitter<{ state: [AppState] }> {
     this.settings = { ...deps.store.load() };
     const key = this.settings.leetifyKey || deps.envKey || null;
     this.leetify = new LeetifyClient(key, deps.fetchImpl);
+    const csrepKey = this.settings.csrepApiKey || deps.csrepApiKey || null;
+    this.csrep = new CsrepClient(csrepKey, deps.fetchImpl);
     const steamKey = this.steamKey;
     this.lobby = this.createLobby();
     this.state = {
       version: deps.version,
       leetify: { hasKey: !!key, reachable: null, fallback: { working: null, reason: null } },
       steam: { hasKey: !!steamKey },
+      csrep: { hasKey: !!csrepKey, reachable: null },
       notice: null,
       game: { source: deps.source.kind, running: false, problem: null, hint: null, rosterUnavailable: false },
       match: null,
@@ -217,6 +227,27 @@ export class Controller extends EventEmitter<{ state: [AppState] }> {
     this.deps.store.save(this.settings);
     this.lobby.setSteamApiKey(this.steamKey);
     this.update({ steam: { hasKey: !!this.steamKey } });
+  }
+
+  /** Saves a CSRep.GG API key (X-API-Key) and clears the lobby cache so players are enriched with it. */
+  setCsrepKey(raw: string): boolean {
+    const key = raw.trim();
+    if (!key) return false;
+    this.settings = { ...this.settings, csrepApiKey: key };
+    this.deps.store.save(this.settings);
+    this.csrep.apiKey = key;
+    this.update({ csrep: { hasKey: true, reachable: null }, notice: null });
+    this.lobby.clear();
+    return true;
+  }
+
+  /** Removes the saved CSRep.GG API key; CSREP_API_KEY takes over if set. */
+  clearCsrepKey(): void {
+    this.settings = { ...this.settings, csrepApiKey: null };
+    this.deps.store.save(this.settings);
+    this.csrep.apiKey = this.deps.csrepApiKey || null;
+    this.update({ csrep: { hasKey: !!this.csrep.apiKey, reachable: null } });
+    this.lobby.clear();
   }
 
   private useKey(key: string | null): void {
@@ -461,22 +492,48 @@ export class Controller extends EventEmitter<{ state: [AppState] }> {
     return /^\d{17}$/.test(steamId) ? `https://leetify.com/app/profile/${steamId}` : null;
   }
 
+  /** The player's CSRep.GG profile; only for a real SteamID64. */
+  csrepPlayerUrl(steamId: string): string | null {
+    return /^\d{17}$/.test(steamId) ? `https://csrep.gg/player/${steamId}` : null;
+  }
+
   // ------------------------------------------------------------------ lobby
 
-  private async lookup(steamIds: string[], onEarly?: (answers: LobbyAnswer[]) => void) {
+  private async fetchCsrepSafe(steamIds: string[]): Promise<Map<string, CsrepPlayer>> {
+    if (!this.csrep.apiKey) return new Map();
     try {
-      return await lookupLobby(this.leetify, steamIds, {
-        concurrency: this.deps.leetifyConcurrency,
-        scrape: this.deps.scrape,
-        onEarly,
-        onSource: (steamId, source) => {
-          if (source) this.sources.set(steamId, source);
-          else this.sources.delete(steamId);
-        },
-        onReach: (ok) => {
-          if (this.state.leetify.reachable !== ok) this.state.leetify = { ...this.state.leetify, reachable: ok };
-        },
-      });
+      const map = await this.csrep.fetchPlayers(steamIds);
+      if (this.state.csrep.reachable !== true) this.update({ csrep: { ...this.state.csrep, reachable: true } });
+      return map;
+    } catch (e) {
+      const notice = e instanceof CsrepError && (e.kind === "invalid-key" || e.kind === "cloudflare-blocked")
+        ? message(e)
+        : this.state.notice;
+      this.update({ csrep: { ...this.state.csrep, reachable: false }, notice });
+      return new Map();
+    }
+  }
+
+  private async lookup(steamIds: string[], onEarly?: (answers: LobbyAnswer[]) => void) {
+    const csrepPromise = this.fetchCsrepSafe(steamIds);
+    try {
+      const [answers, csrepMap] = await Promise.all([
+        lookupLobby(this.leetify, steamIds, {
+          concurrency: this.deps.leetifyConcurrency,
+          scrape: this.deps.scrape,
+          onEarly,
+          onSource: (steamId, source) => {
+            if (source) this.sources.set(steamId, source);
+            else this.sources.delete(steamId);
+          },
+          onReach: (ok) => {
+            if (this.state.leetify.reachable !== ok) this.state.leetify = { ...this.state.leetify, reachable: ok };
+          },
+        }),
+        csrepPromise,
+      ]);
+      if (csrepMap.size === 0) return answers;
+      return answers.map((a) => enrichAnswerWithCsrep(a, a.steamId ? csrepMap.get(a.steamId) : undefined));
     } catch (e) {
       // A missing or rejected key fails the same way every time: tell the lobby, which then waits for a new key (or a new match).
       if (e instanceof LeetifyError && e.kind === "invalid-key") throw new LookupBlocked(message(e));
@@ -497,6 +554,40 @@ export class Controller extends EventEmitter<{ state: [AppState] }> {
     this.checkAlerts();
     this.emit("state", this.state);
   }
+}
+
+function enrichAnswerWithCsrep(answer: LobbyAnswer, csrep: CsrepPlayer | undefined): LobbyAnswer {
+  if (!csrep) return answer;
+  const reputation = mergeCsrepReputation(answer.reputation ?? null, csrep);
+  const classification = reputation?.tier === "BANNED" ? "VERY_HIGH" : answer.classification;
+  const name = answer.name || csrep.name || null;
+  let detail = answer.detail ?? null;
+  if (detail && csrep.ranks) {
+    const faceitRank = numRank(csrep.ranks.faceit?.current);
+    const premierRank = numRank(csrep.ranks.premier?.current);
+    if ((detail.metrics.faceit === null && faceitRank !== null) || (detail.metrics.premier === null && premierRank !== null)) {
+      detail = {
+        ...detail,
+        metrics: {
+          ...detail.metrics,
+          faceit: detail.metrics.faceit ?? faceitRank,
+          premier: detail.metrics.premier ?? premierRank,
+        },
+      };
+    }
+  }
+  return {
+    ...answer,
+    name,
+    classification,
+    reputation,
+    detail,
+    csrep: toCsrepSummary(csrep),
+  };
+}
+
+function numRank(v: unknown): number | null {
+  return typeof v === "number" && Number.isFinite(v) ? v : null;
 }
 
 function message(e: unknown): string {

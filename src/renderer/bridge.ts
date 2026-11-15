@@ -124,6 +124,7 @@ function simulated(): Bridge {
         : { working: true, reason: null },
     },
     steam: { hasKey: false },
+    csrep: { hasKey: false, reachable: null },
     notice: null,
     game: {
       source: "steam",
@@ -195,6 +196,10 @@ function simulated(): Bridge {
     openSteamDeveloper: async () => {},
     setSteamApiKey: async (key) => (key.trim() !== ""),
     clearSteamApiKey: async () => {},
+    setCsrepKey: async (key) => (set({ csrep: { hasKey: key.trim() !== "", reachable: null } }), key.trim() !== ""),
+    clearCsrepKey: async () => set({ csrep: { hasKey: false, reachable: null } }),
+    openCsrepPlayer: async () => {},
+    openCsrepDocs: async () => {},
     updateCheck: async () => ({ status: "current" }),
     openReleases: async () => {},
   };

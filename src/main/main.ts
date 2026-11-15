@@ -21,6 +21,7 @@ import type { Hotkeys } from "../shared/hotkeys";
 import { OVERWOLF_HOTKEYS } from "../shared/overwolf-hotkeys";
 import type { AppState } from "../shared/types";
 import { Controller, type SettingsStore } from "./controller";
+import { CSREP_DOCS_URL } from "./csrep";
 import { checkHeroRuntime, configureHero, onHeroStatus } from "./leetify-hero";
 import { keepClickThrough } from "./click-through";
 import { ensurePortableDataDir, portableDataDir } from "./portable";
@@ -433,6 +434,7 @@ if (!app.requestSingleInstanceLock()) {
       store: settingsStore(),
       envKey: process.env.LEETIFY_API_KEY?.trim() || null,
       steamApiKey: process.env.STEAM_API_KEY?.trim() || null,
+      csrepApiKey: process.env.CSREP_API_KEY?.trim() || null,
       overlay,
       applyHotkeys: overlay.mode === "window" ? applyHotkeys : undefined,
       // Store (MSIX) installs can't add a plain login item, so they don't offer it.
@@ -489,6 +491,16 @@ if (!app.requestSingleInstanceLock()) {
     ipcMain.handle("steam:clear-key", () => controller.clearSteamApiKey());
     ipcMain.handle("steam:open-developer", () => {
       void shell.openExternal("https://steamcommunity.com/dev/apikey");
+    });
+    ipcMain.handle("csrep:set-key", (_e, key: unknown) =>
+      (typeof key === "string" ? controller.setCsrepKey(key) : false));
+    ipcMain.handle("csrep:clear-key", () => controller.clearCsrepKey());
+    ipcMain.handle("csrep:open-player", (_e, steamId: unknown) => {
+      const url = controller.csrepPlayerUrl(String(steamId ?? ""));
+      if (url) void shell.openExternal(url);
+    });
+    ipcMain.handle("csrep:open-docs", () => {
+      void shell.openExternal(CSREP_DOCS_URL);
     });
     ipcMain.handle("update:check", () => checkUpdate(controller));
     ipcMain.handle("update:open-releases", () => {

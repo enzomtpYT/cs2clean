@@ -87,6 +87,7 @@ const API_KEYS_OPEN = "cs2clean.apiKeysOpen";
 function ApiKeysCard({ s }: { s: AppState }) {
   const [leetifyKey, setLeetifyKey] = useState("");
   const [steamKey, setSteamKey] = useState("");
+  const [csrepKey, setCsrepKey] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   // Open unless the user closed it: the choice is remembered between launches.
   const [open, setOpen] = useState(() => {
@@ -106,6 +107,15 @@ function ApiKeysCard({ s }: { s: AppState }) {
     setBusy("steam");
     try {
       if (await bridge.setSteamApiKey(steamKey)) setSteamKey("");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const saveCsrep = async () => {
+    setBusy("csrep");
+    try {
+      if (await bridge.setCsrepKey(csrepKey)) setCsrepKey("");
     } finally {
       setBusy(null);
     }
@@ -179,6 +189,39 @@ function ApiKeysCard({ s }: { s: AppState }) {
                 />
                 <button className="button primary" disabled={!steamKey.trim() || busy === "steam"} onClick={() => void saveSteam()}>
                   {busy === "steam" ? "Saving…" : "Save key"}
+                </button>
+              </div>
+            </>
+          )}
+
+          <hr className="key-sep" />
+
+          {s.csrep.hasKey ? (
+            <div className="account">
+              <div className="account-text">
+                <strong>CSRep.GG API key</strong>
+                <span className="muted small">
+                  {s.csrep.reachable === false
+                    ? "Saved, but CSRep.GG could not be reached."
+                    : "Saved. Enriches players with bans, autoflag, hours and ranks."}
+                </span>
+              </div>
+              <button className="button quiet small-button" onClick={bridge.clearCsrepKey}>Remove</button>
+            </div>
+          ) : (
+            <>
+              <p className="small">
+                Optional CSRep.GG enrichment (bans, autoflag, CS2 hours). Request an API key at{" "}
+                <button className="leetify-link" onClick={() => bridge.openCsrepDocs()}>csrep.gg/docs/api-reference</button>
+              </p>
+              <div className="row">
+                <input
+                  className="key-input" type="password" autoComplete="off" spellCheck={false} placeholder="CSRep.GG X-API-Key"
+                  value={csrepKey} onChange={(e) => setCsrepKey(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && csrepKey.trim() && !busy && void saveCsrep()}
+                />
+                <button className="button primary" disabled={!csrepKey.trim() || busy === "csrep"} onClick={() => void saveCsrep()}>
+                  {busy === "csrep" ? "Saving…" : "Save key"}
                 </button>
               </div>
             </>
@@ -317,8 +360,19 @@ function LobbyLine({ r, groupSize }: { r: LobbyRow; groupSize: number }) {
       )}
       <span className="row-spacer" />
       <PlayerClass r={r} />
+      {r.csrep && (
+        <span className="player-tags">
+          {r.csrep.autoflagged && <span className="group-badge" title="Autoflagged on CSRep.GG">autoflag</span>}
+          {r.csrep.cs2Hours !== null && (
+            <span className="group-badge" title="CS2 hours reported by CSRep.GG">{Math.round(r.csrep.cs2Hours)}h</span>
+          )}
+        </span>
+      )}
       {r.steamId && r.status !== "skipped" && (
-        <button className="leetify-link" onClick={() => bridge.openPlayer(r.steamId!)}>View on Leetify</button>
+        <>
+          <button className="leetify-link" onClick={() => bridge.openPlayer(r.steamId!)}>View on Leetify</button>
+          <button className="leetify-link" onClick={() => bridge.openCsrepPlayer(r.steamId!)}>CSRep</button>
+        </>
       )}
       {r.via === "manual" && r.steamId && (
         <button className="icon-button" title="Take this player off the list" aria-label="Remove player" onClick={() => void bridge.removePlayer(r.steamId!)}><TrashIcon /></button>

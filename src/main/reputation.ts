@@ -40,6 +40,7 @@
 
 import type { PlayerReputation, ReputationTier } from "../shared/reputation-types";
 import type { EvidenceClass } from "../shared/types";
+import type { CsrepBan, CsrepPlayer } from "./csrep";
 import { ratingScale } from "./matches";
 import { expectedMeans, rankGap, TOP_MEANS, type MeanKey } from "./rank-means";
 import type { LeetifyBan, LeetifyProfile, LeetifyRecentMatch } from "./leetify";
@@ -442,4 +443,40 @@ export function toEvidenceClass(r: Reputation): EvidenceClass {
 /** The part of a reputation that goes into lobby rows (no trace, no note). */
 export function toPlayerReputation(r: Reputation): PlayerReputation {
   return { score: r.score, tier: r.tier, confidence: Math.round(r.confidence * 100) / 100, reasons: r.reasons };
+}
+
+/**
+ * Enriches a player's reputation with CSRep.GG signals without altering Leetify's statistical score math.
+ * Any recorded CSRep ban overrides non-banned tiers to BANNED (score 0); autoflag and low CS2 hours are
+ * appended as informational reasons.
+ */
+export function mergeCsrepReputation(base: PlayerReputation | null, csrep: CsrepPlayer): PlayerReputation | null {
+  const bans = (csrep.bans ?? []).filter((b): b is CsrepBan => !!b);
+  if (bans.length > 0) {
+    if (base?.tier === "BANNED") return base;
+    const labels = Array.from(new Set(bans.map((b) => [b.source, b.type].filter(Boolean).join(" ")).filter(Boolean)));
+    const since = bans.map((b) => Date.parse(b.starts_at ?? "")).filter(num);
+    const text =
+      "Ban on record (CSRep" +
+      (labels.length ? `: ${labels.join(", ")}` : "") +
+      ")" +
+      (since.length ? ` since ${new Date(Math.min(...since)).toISOString().slice(0, 10)}` : "");
+    return { score: 0, tier: "BANNED", confidence: 1, reasons: [text] };
+  }
+
+  const extra: string[] = [];
+  if (csrep.autoflag?.id) extra.push("CSRep autoflagged");
+  if (typeof csrep.cs2_hours === "number" && Number.isFinite(csrep.cs2_hours) && csrep.cs2_hours > 0 && csrep.cs2_hours < 200) {
+    extra.push(`Low CS2 hours (${Math.round(csrep.cs2_hours)}h on CSRep)`);
+  }
+  if (extra.length === 0) return base;
+
+  const existing = base?.reasons ?? [];
+  const mergedReasons = [...existing, ...extra.filter((r) => !existing.includes(r))];
+  return {
+    score: base?.score ?? null,
+    tier: base?.tier ?? "UNKNOWN",
+    confidence: base?.confidence ?? 0,
+    reasons: mergedReasons,
+  };
 }

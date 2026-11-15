@@ -17,7 +17,7 @@ export interface KeyCrypto {
 }
 
 /** The entries `save` writes itself. Everything else in the file (lastUpdateCheck, say) belongs to someone else. */
-const OWN_KEYS = new Set(["leetifyKey", "leetifyKeyEnc", "steamApiKey", "steamApiKeyEnc", "siren", "autoOpenFriendsList", "hotkeys"]);
+const OWN_KEYS = new Set(["leetifyKey", "leetifyKeyEnc", "steamApiKey", "steamApiKeyEnc", "csrepApiKey", "csrepApiKeyEnc", "siren", "autoOpenFriendsList", "hotkeys"]);
 
 /** The file's entries, or none when it is missing, unreadable or not a JSON object. */
 function readRaw(file: string): Record<string, unknown> {
@@ -40,7 +40,9 @@ export function settingsFileStore(file: string, keychain: KeyCrypto): SettingsSt
         if (raw.leetifyKeyEnc && keychain.isAvailable()) leetifyKey = keychain.decrypt(raw.leetifyKeyEnc);
         let steamApiKey: string | null = raw.steamApiKey ?? null;
         if (raw.steamApiKeyEnc && keychain.isAvailable()) steamApiKey = keychain.decrypt(raw.steamApiKeyEnc);
-        return { leetifyKey, steamApiKey, siren: raw.siren, autoOpenFriendsList: raw.autoOpenFriendsList, hotkeys: raw.hotkeys };
+        let csrepApiKey: string | null = raw.csrepApiKey ?? null;
+        if (raw.csrepApiKeyEnc && keychain.isAvailable()) csrepApiKey = keychain.decrypt(raw.csrepApiKeyEnc);
+        return { leetifyKey, steamApiKey, csrepApiKey, siren: raw.siren, autoOpenFriendsList: raw.autoOpenFriendsList, hotkeys: raw.hotkeys };
       } catch {
         return {};
       }
@@ -51,6 +53,8 @@ export function settingsFileStore(file: string, keychain: KeyCrypto): SettingsSt
       else if (s.leetifyKey) out.leetifyKey = s.leetifyKey;
       if (s.steamApiKey && keychain.isAvailable()) out.steamApiKeyEnc = keychain.encrypt(s.steamApiKey);
       else if (s.steamApiKey) out.steamApiKey = s.steamApiKey;
+      if (s.csrepApiKey && keychain.isAvailable()) out.csrepApiKeyEnc = keychain.encrypt(s.csrepApiKey);
+      else if (s.csrepApiKey) out.csrepApiKey = s.csrepApiKey;
       // What this store doesn't own stays as it was.
       for (const [k, v] of Object.entries(readRaw(file))) if (!OWN_KEYS.has(k)) out[k] = v;
       writeFileSync(file, JSON.stringify(out, null, 2));

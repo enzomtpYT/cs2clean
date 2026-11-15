@@ -113,6 +113,22 @@ export interface PlayerDetail {
   matches: MatchSummary | null;
 }
 
+export interface CsrepBanSummary {
+  source: string;
+  type: string;
+  reason: string | null;
+  startsAt: string | null;
+}
+
+export interface CsrepSummary {
+  cs2Hours: number | null;
+  steamLevel: number | null;
+  steamCreatedAt: string | null;
+  autoflagged: boolean;
+  bans: CsrepBanSummary[];
+  faceitUrl: string | null;
+}
+
 export interface LobbyRow extends RosterPlayer {
   classification: EvidenceClass | null;
   /** The Leetify matches the profile covers (0 when unknown). */
@@ -121,6 +137,8 @@ export interface LobbyRow extends RosterPlayer {
   detail: PlayerDetail | null;
   /** The 0-100 reputation score, tier and reasons (main/reputation.ts); null when there was no lookup. */
   reputation: PlayerReputation | null;
+  /** Optional CSRep.GG enrichment (bans, autoflag, hours, Steam account age). */
+  csrep?: CsrepSummary | null;
   /** Why there is no class (private profile, not on Leetify, rate limit...), for a tooltip. */
   note: string | null;
   /** UUID for the Steam friendship group this player belongs to in the current lobby; null when solo. */
@@ -147,6 +165,12 @@ export interface AppState {
   steam: {
     /** A Steam Web API key is saved. Used for grouping friends in the lobby. */
     hasKey: boolean;
+  };
+  csrep: {
+    /** A CSRep.GG API key is saved (or set in CSREP_API_KEY). */
+    hasKey: boolean;
+    /** null until the first lookup; false when CSRep couldn't be reached or rejected the key. */
+    reachable: boolean | null;
   };
   /** Shown once, e.g. "Leetify rejected the API key". */
   notice: string | null;
@@ -241,6 +265,14 @@ export interface Bridge {
   setSteamApiKey(key: string): Promise<boolean>;
   /** Removes the saved Steam Web API key. */
   clearSteamApiKey(): Promise<void>;
+  /** Saves a CSRep.GG API key (X-API-Key); returns false if empty. */
+  setCsrepKey(key: string): Promise<boolean>;
+  /** Removes the saved CSRep.GG API key. */
+  clearCsrepKey(): Promise<void>;
+  /** Opens the player's CSRep.GG profile in the browser. */
+  openCsrepPlayer(steamId: string): Promise<void>;
+  /** Opens the CSRep.GG API reference page in the browser. */
+  openCsrepDocs(): Promise<void>;
   /** Checks for a newer release now (the once-a-day limit is for the automatic check at start-up only). */
   updateCheck(): Promise<UpdateResult>;
   /** Opens the GitHub releases page. */
