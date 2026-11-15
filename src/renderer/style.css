@@ -50,6 +50,8 @@ kbd { font: 600 0.8rem var(--display); letter-spacing: 0.04em; padding: 1px 6px;
 .wordmark-accent { color: var(--accent); }
 .status-dots { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 6px 16px; }
 .server-dot { display: inline-flex; align-items: center; gap: 6px; font-size: 0.8rem; color: var(--muted); }
+.server-dot-btn { background: none; border: 0; padding: 0; font: inherit; cursor: pointer; }
+.server-dot-btn:hover { color: var(--text); }
 .server-dot .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
 .server-ok .dot { background: var(--normal); }
 .server-bad .dot { background: var(--high); }

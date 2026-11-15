@@ -83,6 +83,8 @@ export class SteamSource extends GameSource {
   private game: GameState | null = null;
   private gsiAt = 0;
   private matchStart: number | null = null;
+  /** When the previous match ended (ms); coplay entries from before this are ignored. */
+  private lastMatchEnd: number | null = null;
   private players: RosterPlayer[] = [];
   /** Players the user added by hand (addPlayer): a community server's players are in no list. Cleared with the roster. */
   private manual: RosterPlayer[] = [];
@@ -192,6 +194,7 @@ export class SteamSource extends GameSource {
         this.listed = true;
       } else {
         // A new map (or back to the menu): forget the previous match's players.
+        if (prevMap) this.lastMatchEnd = this.now;
         this.matchStart = s.map ? this.now : null;
         this.clearRoster();
         this.groupStart = null;
@@ -330,6 +333,7 @@ export class SteamSource extends GameSource {
     if (this.running && this.gsiAt > 0 && !this.gsiLive) {
       // CS2 closed.
       this.game = null;
+      if (this.matchStart != null || this.mapSince != null) this.lastMatchEnd = this.now;
       this.matchStart = null;
       this.sessionStart = null;
       this.mapSince = null;
@@ -422,6 +426,7 @@ export class SteamSource extends GameSource {
         now: Math.floor(this.now / 1000),
         localSteamId: local,
         matchStart: this.matchStart != null ? Math.floor(this.matchStart / 1000) : null,
+        minTime: this.lastMatchEnd != null ? Math.floor(this.lastMatchEnd / 1000) : null,
         expectedOthers: others,
       });
       if (this.inMap) {

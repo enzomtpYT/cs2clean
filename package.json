@@ -8,7 +8,7 @@
   "homepage": "https://github.com/papelblume/cs2clean",
   "main": "dist/main/main.js",
   "scripts": {
-    "build": "tsc -p tsconfig.main.json && tsc --noEmit -p tsconfig.json && vite build",
+    "build": "tsc -p tsconfig.main.json && tsc --noEmit -p tsconfig.json && vite build && node tools/wayland/build.mjs",
     "start": "npm run build && electron .",
     "start:replay": "npm run build && electron . --replay",
     "start:overwolf": "npm run build && ow-electron . --overwolf",
@@ -74,7 +74,8 @@
       "!node_modules/koffi/{src,doc,vendor}/**"
     ],
     "asarUnpack": [
-      "node_modules/koffi/**"
+      "node_modules/koffi/**",
+      "dist/wayland-overlay"
     ],
     "electronLanguages": [
       "en-US"

@@ -44,6 +44,16 @@ describe("picking the match from Steam's players list", () => {
     expect(r.others.map((p) => p.name)).toEqual(["p30", "p31", "p32"]);
   });
 
+  it("ignores entries from before minTime so a previous match never leaks into a smaller new match", () => {
+    const entries = [
+      ...[1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => E(n, now - 100)), // previous 5v5 match
+      ...[20, 21, 22].map((n) => E(n, now - 10)),                // new smaller match (e.g. Retakes)
+    ];
+    const byMinTime = pickMatchPlayers(entries, { now, localSteamId: ME, matchStart: now - 15, minTime: now - 50 });
+    expect(byMinTime.players.map((p) => p.name).sort()).toEqual(["p20", "p21", "p22"]);
+    expect(byMinTime.others).toEqual([]);
+  });
+
   it("caps a group at the players a match can have", () => {
     const entries = Array.from({ length: 12 }, (_, i) => E(i + 1, now - 60 + i));
     expect(pickMatchPlayers(entries, { now, expectedOthers: 9 }).players).toHaveLength(9);

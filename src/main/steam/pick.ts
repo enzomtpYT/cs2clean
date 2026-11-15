@@ -14,6 +14,8 @@ export interface PickOptions {
   localSteamId?: string | null;
   /** Unix seconds when the current map loaded (from the game's state feed). Unknown: null. */
   matchStart?: number | null;
+  /** Unix seconds when the previous match ended; entries before this are ignored. */
+  minTime?: number | null;
   /** Other players to look for (see othersToFind: 9 in Competitive/Premier, 3 in Wingman). Unknown mode: 9. */
   expectedOthers?: number;
   /** Entries reported this close together (s) count as one group. */
@@ -32,7 +34,8 @@ export function pickMatchPlayers(entries: CoplayEntry[], o: PickOptions): PickRe
   const expected = o.expectedOthers ?? othersToFind(null);
   const gap = o.groupGapS ?? 20;
   // Steam can report players a little before the game-state feed tells us the map loaded.
-  const since = o.matchStart != null ? o.matchStart - 180 : o.now - (o.recentS ?? 15 * 60);
+  const baseSince = o.matchStart != null ? o.matchStart - 180 : o.now - (o.recentS ?? 15 * 60);
+  const since = o.minTime != null ? Math.max(baseSince, o.minTime) : baseSince;
   const seen = new Set<string>();
   const recent = entries
     .filter((e) => e.appId === CS2_APP_ID && e.steamId !== o.localSteamId && e.time >= since && e.time <= o.now + 60)

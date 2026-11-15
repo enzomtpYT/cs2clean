@@ -15,7 +15,7 @@
 // when CS2 runs in "Fullscreen Windowed" mode.
 
 import { app, BrowserWindow, globalShortcut, ipcMain, net, safeStorage, screen, shell, utilityProcess } from "electron";
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Hotkeys } from "../shared/hotkeys";
 import { OVERWOLF_HOTKEYS } from "../shared/overwolf-hotkeys";
@@ -24,6 +24,8 @@ import { Controller, type SettingsStore } from "./controller";
 import { CSREP_DOCS_URL } from "./csrep";
 import { checkHeroRuntime, configureHero, onHeroStatus } from "./leetify-hero";
 import { keepClickThrough } from "./click-through";
+import { keepOverlayPositionedAndOnTop, linuxOverlayWindowOptions, overlayBounds, OVERLAY_SIZE } from "./overlay-window";
+import { shouldUseWaylandLayerShell, WaylandLayerOverlay } from "./wayland-overlay";
 import { ensurePortableDataDir, portableDataDir } from "./portable";
 import { noteUpdateCheck, readLastUpdateCheck, settingsFileStore, type KeyCrypto } from "./settings-file";
 import { checkForUpdate, OWNER, REPO } from "./update-checker";
@@ -210,6 +212,7 @@ function scanCoplay(localSteamId: string | null): Promise<CoplayResult> {
 
 let desktop: BrowserWindow | null = null;
 let overlayWin: BrowserWindow | null = null;
+let waylandOverlay: WaylandLayerOverlay | null = null;
 let controller: Controller;
 /** The siren ignore list in the app's data folder (main/siren-ignore.ts); made when the app starts. */
 let sirenIgnore: SirenIgnoreList | null = null;
@@ -252,8 +255,6 @@ function lockNavigation(win: BrowserWindow) {
 }
 
 // ------------------------------------------------------------------ overlay
-
-const OVERLAY_SIZE = { width: 380, height: 640 };
 
 function setupOverlay(): AppState["overlay"] {
   const base = {
@@ -335,12 +336,42 @@ function startOverwolfOverlay(overlayApi: any) {
     );
 }
 
+function waylandOverlayBinPath(): string {
+  return app.isPackaged
+    ? join(process.resourcesPath, "app.asar.unpacked", "dist", "wayland-overlay")
+    : join(root, "dist", "wayland-overlay");
+}
+
 /** Created hidden at start-up, so the siren can play before the overlay is shown. */
 function createOverlayWindow(): BrowserWindow {
   if (overlayWin && !overlayWin.isDestroyed()) return overlayWin;
-  const area = screen.getPrimaryDisplay().workArea;
+  const bounds = overlayBounds(screen.getPrimaryDisplay().workArea);
+  const waylandBin = waylandOverlayBinPath();
+  if (shouldUseWaylandLayerShell(process.env, process.platform, existsSync(waylandBin))) {
+    overlayWin = new BrowserWindow({
+      ...bounds,
+      frame: false, transparent: true, show: false,
+      webPreferences: { ...webPreferences(), offscreen: true, backgroundThrottling: false, autoplayPolicy: "no-user-gesture-required" },
+    });
+    waylandOverlay = new WaylandLayerOverlay(waylandBin, bounds);
+    overlayWin.webContents.setFrameRate(30);
+    overlayWin.webContents.on("paint", (_e, _dirty, image) => {
+      const { width, height } = image.getSize();
+      waylandOverlay?.sendFrame(width, height, image.toBitmap());
+    });
+    overlayWin.on("closed", () => {
+      overlayWin = null;
+      waylandOverlay?.dispose();
+      waylandOverlay = null;
+    });
+    lockNavigation(overlayWin);
+    load(overlayWin, "overlay");
+    return overlayWin;
+  }
+
   overlayWin = new BrowserWindow({
-    ...OVERLAY_SIZE, x: area.x + 24, y: area.y + 120,
+    ...bounds,
+    ...linuxOverlayWindowOptions(),
     frame: false, transparent: true, resizable: false, movable: false, alwaysOnTop: true, skipTaskbar: true,
     focusable: false, hasShadow: false, show: false,
     webPreferences: { ...webPreferences(), backgroundThrottling: false, autoplayPolicy: "no-user-gesture-required" },
@@ -360,9 +391,14 @@ function syncOverlay() {
   const win = overlayWin && !overlayWin.isDestroyed() ? overlayWin : null;
   if (!win) return;
   const want = controller.state.overlay.visible;
+  if (waylandOverlay) {
+    if (want && !waylandOverlay.visible) waylandOverlay.show();
+    else if (!want && waylandOverlay.visible) waylandOverlay.hide();
+    return;
+  }
   if (want && !win.isVisible()) {
     win.showInactive();
-    win.setAlwaysOnTop(true, "screen-saver");
+    keepOverlayPositionedAndOnTop(win, overlayBounds(screen.getPrimaryDisplay().workArea));
     keepClickThrough(win); // the window manager can undo it while it maps the window (main/click-through.ts)
   } else if (!want && win.isVisible()) win.hide();
 }
@@ -518,6 +554,8 @@ if (!app.requestSingleInstanceLock()) {
 
   app.on("will-quit", () => {
     globalShortcut.unregisterAll();
+    waylandOverlay?.dispose();
+    waylandOverlay = null;
     controller?.stop();
   });
   app.on("window-all-closed", () => app.quit());

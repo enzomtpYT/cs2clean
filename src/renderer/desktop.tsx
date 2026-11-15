@@ -40,7 +40,7 @@ function App() {
     <div className="shell">
       <header className="topbar">
         <div className="brand"><Logo size={26} /><Wordmark /></div>
-        <div className="status-dots"><LeetifyDot s={s} /><FallbackDot s={s} /></div>
+        <div className="status-dots"><OverlayDot s={s} /><LeetifyDot s={s} /><FallbackDot s={s} /></div>
       </header>
       <main className="content">
         {s.notice && <p className="notice">{s.notice}</p>}
@@ -67,6 +67,30 @@ function App() {
         <SettingsPanel s={s} />
       </footer>
     </div>
+  );
+}
+
+function OverlayDot({ s }: { s: AppState }) {
+  if (s.overlay.mode === "none") return null;
+  const on = s.overlay.visible;
+  const label = on ? "Overlay on" : "Overlay off";
+  const tone = on ? "ok" : "pending";
+  if (s.overlay.mode === "window") {
+    return (
+      <button
+        type="button"
+        className={`server-dot server-dot-btn server-${tone}`}
+        onClick={() => bridge.toggleOverlay()}
+        title={`Click or press ${s.overlay.hotkey} to ${on ? "hide" : "show"} the in-game overlay`}
+      >
+        <span className="dot" />{label}
+      </button>
+    );
+  }
+  return (
+    <span className={`server-dot server-${tone}`} title={`In-game overlay (${s.overlay.hotkey})`}>
+      <span className="dot" />{label}
+    </span>
   );
 }
 

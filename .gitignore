@@ -11,6 +11,7 @@ dist-electron/
 out/
 build/
 release/
+tools/wayland/.gen/
 *.tsbuildinfo
 
 # Packaged installers / artifacts
