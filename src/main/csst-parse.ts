@@ -5,27 +5,73 @@
 
 import type { LeetifyProfile } from "./leetify";
 
-/** The inside of a tag, up to its closing ">" (a ">" inside a quoted attribute value doesn't end it). */
-const TAG_BODY = `(?:[^>"']|"[^"]*"|'[^']*')*`;
-
 const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/**
+ * Finds the end index (`>`) of an HTML tag starting at `start` (`html[start] === "<"`),
+ * respecting single- and double-quoted attribute values in linear time (no regex backtracking).
+ */
+function findTagEnd(html: string, start: number): number {
+  let quote: string | null = null;
+  for (let i = start + 1; i < html.length; i++) {
+    const ch = html[i];
+    if (quote) {
+      if (ch === quote) quote = null;
+    } else if (ch === '"' || ch === "'") {
+      quote = ch;
+    } else if (ch === ">") {
+      return i;
+    }
+  }
+  return -1;
+}
 
 /**
  * Everything between the opening and closing tag of the element with this id, markup included. Elements of the same
  * name inside it are skipped when looking for where it ends. null when there is no such element.
  */
 function innerHtmlOf(html: string, id: string): string | null {
-  const open = new RegExp(`<([A-Za-z][\\w-]*)\\b${TAG_BODY}\\bid="${escapeRegExp(id)}"${TAG_BODY}>`).exec(html);
-  if (!open) return null;
-  const tag = open[1];
-  const start = open.index + open[0].length;
-  const sameTag = new RegExp(`<(/?)${tag}\\b${TAG_BODY}>`, "gi");
-  sameTag.lastIndex = start;
-  let depth = 1;
-  for (let m = sameTag.exec(html); m; m = sameTag.exec(html)) {
-    if (m[1]) depth--;
-    else if (!m[0].endsWith("/>")) depth++;
-    if (depth === 0) return html.slice(start, m.index);
+  const idAttr = `id="${id}"`;
+  let searchFrom = 0;
+  while (searchFrom < html.length) {
+    const idPos = html.indexOf(idAttr, searchFrom);
+    if (idPos === -1) return null;
+    const tagStart = html.lastIndexOf("<", idPos);
+    if (tagStart === -1) {
+      searchFrom = idPos + idAttr.length;
+      continue;
+    }
+    const tagEnd = findTagEnd(html, tagStart);
+    if (tagEnd === -1 || idPos > tagEnd) {
+      searchFrom = idPos + idAttr.length;
+      continue;
+    }
+    const openTag = html.slice(tagStart, tagEnd + 1);
+    const nameMatch = /^<([A-Za-z][\w-]*)\b/.exec(openTag);
+    if (!nameMatch) {
+      searchFrom = tagEnd + 1;
+      continue;
+    }
+    const tag = nameMatch[1].toLowerCase();
+    const contentStart = tagEnd + 1;
+    let depth = 1;
+    let pos = contentStart;
+    while (pos < html.length) {
+      const lt = html.indexOf("<", pos);
+      if (lt === -1) return null;
+      const gt = findTagEnd(html, lt);
+      if (gt === -1) return null;
+      const rawTag = html.slice(lt + 1, gt);
+      const isClose = rawTag.startsWith("/");
+      const candidate = (isClose ? rawTag.slice(1) : rawTag).match(/^([A-Za-z][\w-]*)\b/)?.[1]?.toLowerCase();
+      if (candidate === tag) {
+        if (isClose) depth--;
+        else if (!rawTag.endsWith("/")) depth++;
+        if (depth === 0) return html.slice(contentStart, lt);
+      }
+      pos = gt + 1;
+    }
+    return null;
   }
   return null;
 }
@@ -37,7 +83,25 @@ function innerHtmlOf(html: string, id: string): string | null {
  */
 function textOf(html: string, id: string): string | null {
   const inner = innerHtmlOf(html, id);
-  return inner === null ? null : inner.replace(new RegExp(`<${TAG_BODY}>`, "g"), " ").replace(/\s+/g, " ").trim();
+  if (inner === null) return null;
+  let out = "";
+  let pos = 0;
+  while (pos < inner.length) {
+    const lt = inner.indexOf("<", pos);
+    if (lt === -1) {
+      out += inner.slice(pos);
+      break;
+    }
+    out += inner.slice(pos, lt);
+    const gt = findTagEnd(inner, lt);
+    if (gt === -1) {
+      out += inner.slice(lt);
+      break;
+    }
+    out += " ";
+    pos = gt + 1;
+  }
+  return out.replace(/\s+/g, " ").trim();
 }
 
 /**

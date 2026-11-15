@@ -6,13 +6,20 @@
 //   DEBUG=leetify npm run start    # Leetify API only
 //   DEBUG=hero,leetify npm run start  # both
 
+function redact(v: unknown): unknown {
+  if (typeof v !== "string") return v;
+  return v
+    .replace(/([?&](?:key|api_?key|token)=)[^&\s]+/gi, "$1[REDACTED]")
+    .replace(/(Bearer\s+)[A-Za-z0-9._~+/=-]+/gi, "$1[REDACTED]");
+}
+
 export function debug(category: string, ...args: unknown[]): void {
   const env = process.env.DEBUG ?? "";
   if (!env) return;
   if (env !== "1" && !env.split(",").map((c) => c.trim()).includes(category)) return;
 
   const ts = new Date().toISOString().slice(11, 19);
-  console.log(`[${ts}][${category}]`, ...args);
+  console.log(`[${ts}][${category}]`, ...args.map(redact));
 }
 
 /**
@@ -21,5 +28,5 @@ export function debug(category: string, ...args: unknown[]): void {
  */
 export function warn(category: string, ...args: unknown[]): void {
   const ts = new Date().toISOString().slice(11, 19);
-  console.warn(`[${ts}][${category}]`, ...args);
+  console.warn(`[${ts}][${category}]`, ...args.map(redact));
 }

@@ -4,7 +4,7 @@
 // tells us when a map loads, when warm-up ends and the match goes live, the mode, and our own Steam ID.
 
 import { execFileSync } from "node:child_process";
-import { randomBytes } from "node:crypto";
+import { randomBytes, timingSafeEqual } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { homedir } from "node:os";
@@ -129,6 +129,13 @@ export function newGsiToken(): string {
   return randomBytes(16).toString("hex");
 }
 
+function tokensEqual(a: unknown, b: string): boolean {
+  if (typeof a !== "string") return false;
+  const ab = Buffer.from(a, "utf8");
+  const bb = Buffer.from(b, "utf8");
+  return ab.length === bb.length && timingSafeEqual(ab, bb);
+}
+
 /** Listens on 127.0.0.1 only. Payloads without our token are ignored. */
 export function startGsiServer(token: string, onState: (s: GameState) => void, port = GSI_PORT): Server {
   const server = createServer((req, res) => {
@@ -138,6 +145,7 @@ export function startGsiServer(token: string, onState: (s: GameState) => void, p
     }
     let size = 0;
     const chunks: Buffer[] = [];
+    req.on("error", () => req.destroy());
     req.on("data", (c: Buffer) => {
       size += c.length;
       if (size > 1_000_000) req.destroy();
@@ -147,13 +155,14 @@ export function startGsiServer(token: string, onState: (s: GameState) => void, p
       res.writeHead(200).end();
       try {
         const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-        if (body?.auth?.token !== token) return;
+        if (!tokensEqual(body?.auth?.token, token)) return;
         onState(parseGsi(body));
       } catch {
         /* not JSON */
       }
     });
   });
+  server.requestTimeout = 5_000;
   server.on("error", (e) => console.warn("game state listener:", e.message));
   server.listen(port, "127.0.0.1");
   return server;

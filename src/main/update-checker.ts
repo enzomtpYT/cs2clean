@@ -41,7 +41,10 @@ export async function checkForUpdate(currentVersion: string, fetchImpl: typeof f
   if (!local) return failed(`this app's version "${currentVersion}" isn't one it can compare`);
   let res: Response;
   try {
-    res = await fetchImpl(API, { headers: { Accept: "application/vnd.github.v3+json" } });
+    res = await fetchImpl(API, {
+      headers: { Accept: "application/vnd.github.v3+json" },
+      signal: AbortSignal.timeout(10_000),
+    });
   } catch (e) {
     return failed(`can't reach GitHub (${e instanceof Error ? e.message : String(e)})`);
   }

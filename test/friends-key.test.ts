@@ -36,7 +36,7 @@ describe("Steam rejects the API key (403)", () => {
     const { groupPlayers } = await import("../src/main/steam/friends");
     mockFetch.mockResolvedValueOnce(ok(["b"])).mockResolvedValue(forbidden());
     await expect(groupPlayers(["a", "b", "c"], "bad-key")).rejects.toThrow(/key invalid/);
-    expect(mockFetch).toHaveBeenCalledTimes(2);
+    expect(mockFetch).toHaveBeenCalledTimes(3);
   });
 
   test("other failures are still retried and only reported", async () => {

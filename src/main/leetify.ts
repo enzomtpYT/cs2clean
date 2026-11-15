@@ -301,7 +301,7 @@ export async function lookupLobby(client: LeetifyClient, steamIds: string[], o: 
       out[i] = await one(steamIds[i]);
     }
   };
-  await Promise.all(Array.from({ length: Math.max(1, Math.min(o.concurrency ?? 3, steamIds.length)) }, worker));
+  await Promise.all(Array.from({ length: Math.max(1, Math.min(o.concurrency ?? 6, steamIds.length)) }, worker));
   if (fatal) throw fatal;
   if (steamIds.length >= FORBIDDEN_MIN_PLAYERS && forbidden === steamIds.length)
     throw new LeetifyError("invalid-key", "Leetify refused every request (HTTP 403). Check the API key and its access under Settings.", 403);

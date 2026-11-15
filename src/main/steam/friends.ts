@@ -10,7 +10,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 
 const BASE = "https://api.steampowered.com";
 const ENDPOINT = "/ISteamUser/GetFriendList/v0001/";
-const DELAY_MS = 200;
+const FRIENDS_CONCURRENCY = 4;
 
 /**
  * The Steam ID validateSteamKey asks about. Any ID works: the key is judged by the status of the answer, not by
@@ -129,18 +129,47 @@ export async function groupPlayers(lobbyIds: string[], apiKey: string): Promise<
   const private_: string[] = [];
   const errors: string[] = [];
 
+  if (deduped.length === 0) return { groups: [], private: [], errors: [] };
+
+  const results = new Map<string, FetchResult>();
+  // Probe the first player before fanning out so an invalid API key fails in 1 request.
+  const firstResult = await fetchFriends(deduped[0], apiKey);
+  if (firstResult.kind === "badKey") throw new Error(`Steam API key invalid or missing: ${firstResult.detail}`);
+  results.set(deduped[0], firstResult);
+
+  let next = 1;
+  let badKeyError: Error | null = null;
+
+  const worker = async () => {
+    while (next < deduped.length && !badKeyError) {
+      const id = deduped[next++];
+      const result = await fetchFriends(id, apiKey);
+      if (result.kind === "badKey") {
+        badKeyError = new Error(`Steam API key invalid or missing: ${result.detail}`);
+        return;
+      }
+      results.set(id, result);
+    }
+  };
+
+  const remaining = deduped.length - 1;
+  if (remaining > 0) {
+    const workers = Math.max(1, Math.min(FRIENDS_CONCURRENCY, remaining));
+    await Promise.all(Array.from({ length: workers }, worker));
+    if (badKeyError) throw badKeyError;
+  }
+
   for (const id of deduped) {
-    const result = await fetchFriends(id, apiKey);
-    if (result.kind === "badKey") throw new Error(`Steam API key invalid or missing: ${result.detail}`);
-    await sleep(DELAY_MS);
+    const result = results.get(id);
+    if (!result || result.kind === "error") {
+      errors.push(id);
+      continue;
+    }
     if (result.kind === "private") {
       private_.push(id);
       continue;
     }
-    if (result.kind === "error") {
-      errors.push(id);
-      continue;
-    }
+    if (result.kind !== "ok") continue;
     for (const fid of result.friends) {
       if (lobbySet.has(fid)) {
         uf.union(id, fid);

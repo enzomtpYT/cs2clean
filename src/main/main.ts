@@ -14,7 +14,7 @@
 // default overlay is an ordinary see-through, click-through window kept on top of the game, which works
 // when CS2 runs in "Fullscreen Windowed" mode.
 
-import { app, BrowserWindow, globalShortcut, ipcMain, net, safeStorage, screen, shell, utilityProcess } from "electron";
+import { app, BrowserWindow, globalShortcut, ipcMain, net, safeStorage, screen, session, shell, utilityProcess, type UtilityProcess } from "electron";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Hotkeys } from "../shared/hotkeys";
@@ -25,6 +25,7 @@ import { CSREP_DOCS_URL } from "./csrep";
 import { checkHeroRuntime, configureHero, onHeroStatus } from "./leetify-hero";
 import { keepClickThrough } from "./click-through";
 import { keepOverlayPositionedAndOnTop, linuxOverlayWindowOptions, overlayBounds, OVERLAY_SIZE } from "./overlay-window";
+import { playerCacheFileStore } from "./player-cache";
 import { shouldUseWaylandLayerShell, WaylandLayerOverlay } from "./wayland-overlay";
 import { ensurePortableDataDir, portableDataDir } from "./portable";
 import { noteUpdateCheck, readLastUpdateCheck, settingsFileStore, type KeyCrypto } from "./settings-file";
@@ -37,13 +38,13 @@ import { CS2_GAME_ID, type GameSource } from "./game/source";
 import { SteamSource } from "./game/steam";
 import { SirenIgnoreList, SIREN_IGNORE_FILE } from "./siren-ignore";
 import type { CoplayResult } from "./steam/coplay";
+import { FRIENDS_WINDOW_URL, FriendsWindowOpener } from "./steam/friends-window";
 import { installGsiConfig, newGsiToken, readActiveSteamId, startGsiServer } from "./steam/gsi";
 import { isCs2Running } from "./steam/process";
 import { cefHint, detectCef, findCs2ConsoleLog, friendsHint, profileFallbackWanted, systemCefIo, systemConsoleLog, type CefCapability, type ConsoleLogCapability } from "./steam/capabilities";
 import { MiniprofileStatus } from "./steam/miniprofile";
 import { watchStatusBlocks } from "./steam/console-log";
 import { FriendNameDirectory } from "./steam/friend-names";
-import { FriendsWindowOpener } from "./steam/friends-window";
 import { findFriendsTarget, listDebugTargets, readFriendUi } from "./steam/steam-ui";
 
 // Overwolf's overlay keeps the default hotkeys (none is bound in CS2 by default); the app's own overlay
@@ -155,7 +156,9 @@ function steamSource(): SteamSource {
     // ... and Steam's friends list window is opened when it is closed (the "open it for me" setting), once when the app
     // starts and in a match's warm-up.
     friendsWindow: new FriendsWindowOpener({
-      open: (url) => shell.openExternal(url),
+      open: (url) => {
+        if (url === FRIENDS_WINDOW_URL) return shell.openExternal(url);
+      },
       windowState: async () => {
         const r = await listDebugTargets();
         return !r.ok ? "unreachable" : findFriendsTarget(r.targets) ? "open" : "closed";
@@ -188,25 +191,56 @@ function steamSource(): SteamSource {
   });
 }
 
-/** Reads Steam's players list in a short-lived utility process (steam/coplay-worker.ts). */
+let coplayWorker: UtilityProcess | null = null;
+let coplaySeq = 0;
+const coplayPending = new Map<number, {
+  resolve: (r: CoplayResult) => void;
+  reject: (e: Error) => void;
+  timer: NodeJS.Timeout;
+}>();
+
+function ensureCoplayWorker(): UtilityProcess {
+  if (coplayWorker) return coplayWorker;
+  const child = utilityProcess.fork(join(__dirname, "steam", "coplay-worker.js"), [], { serviceName: "Steam players list" });
+  child.on("message", (m: { id?: number; ok: boolean; result?: CoplayResult; error?: string }) => {
+    const entry = typeof m.id === "number" ? coplayPending.get(m.id) : undefined;
+    if (!entry) return;
+    coplayPending.delete(m.id!);
+    clearTimeout(entry.timer);
+    if (m.ok && m.result) entry.resolve(m.result);
+    else entry.reject(new Error(m.error ?? "Couldn't read Steam's players list."));
+  });
+  child.on("exit", (code) => {
+    if (coplayWorker === child) coplayWorker = null;
+    for (const [id, entry] of coplayPending) {
+      coplayPending.delete(id);
+      clearTimeout(entry.timer);
+      entry.reject(new Error(`Reading Steam's players list failed (code ${code}).`));
+    }
+  });
+  coplayWorker = child;
+  return child;
+}
+
+function stopCoplayWorker(): void {
+  if (!coplayWorker) return;
+  const child = coplayWorker;
+  coplayWorker = null;
+  child.kill();
+}
+
+/** Reads Steam's players list in a persistent utility process (steam/coplay-worker.ts). */
 function scanCoplay(localSteamId: string | null): Promise<CoplayResult> {
   return new Promise((resolve, reject) => {
-    const child = utilityProcess.fork(join(__dirname, "steam", "coplay-worker.js"), [], { serviceName: "Steam players list" });
+    const id = ++coplaySeq;
+    const child = ensureCoplayWorker();
     const timer = setTimeout(() => {
-      child.kill();
+      coplayPending.delete(id);
+      stopCoplayWorker(); // reset wedged worker
       reject(new Error("Steam didn't answer. Is Steam running and signed in?"));
     }, 10_000);
-    child.once("message", (m: { ok: boolean; result?: CoplayResult; error?: string }) => {
-      clearTimeout(timer);
-      child.kill();
-      if (m.ok && m.result) resolve(m.result);
-      else reject(new Error(m.error ?? "Couldn't read Steam's players list."));
-    });
-    child.once("exit", (code) => {
-      clearTimeout(timer);
-      reject(new Error(`Reading Steam's players list failed (code ${code}).`));
-    });
-    child.postMessage({ localSteamId });
+    coplayPending.set(id, { resolve, reject, timer });
+    child.postMessage({ id, localSteamId });
   });
 }
 
@@ -245,13 +279,26 @@ function createDesktopWindow() {
   load(desktop, "index");
 }
 
+/** Opens only validated http(s) URLs in the user's browser. */
+function openSafeExternal(raw: string): void {
+  try {
+    const parsed = new URL(raw);
+    if (parsed.protocol === "https:" || (parsed.protocol === "http:" && !app.isPackaged)) {
+      void shell.openExternal(parsed.toString());
+    }
+  } catch {
+    // Ignore malformed URLs.
+  }
+}
+
 /** Pages stay inside the app; links open in the user's browser. */
 function lockNavigation(win: BrowserWindow) {
   win.webContents.setWindowOpenHandler(({ url }) => {
-    if (/^https?:\/\//i.test(url)) void shell.openExternal(url);
+    openSafeExternal(url);
     return { action: "deny" };
   });
   win.webContents.on("will-navigate", (e) => e.preventDefault());
+  win.webContents.on("will-attach-webview", (e) => e.preventDefault());
 }
 
 // ------------------------------------------------------------------ overlay
@@ -458,6 +505,7 @@ if (!app.requestSingleInstanceLock()) {
   const overlay = setupOverlay();
 
   app.whenReady().then(() => {
+    session.defaultSession.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
     const source = gameSource();
     if (arg("record")) console.log("recording to", record(source, join(app.getPath("userData"), "recordings")));
     // The csst.at fallback uses Electron's net.fetch (Chromium's network stack) in-process.
@@ -468,6 +516,9 @@ if (!app.requestSingleInstanceLock()) {
       version: app.getVersion(),
       source,
       store: settingsStore(),
+      lobby: {
+        cacheStore: playerCacheFileStore(join(app.getPath("userData"), "player-cache.json")),
+      },
       envKey: process.env.LEETIFY_API_KEY?.trim() || null,
       steamApiKey: process.env.STEAM_API_KEY?.trim() || null,
       csrepApiKey: process.env.CSREP_API_KEY?.trim() || null,
@@ -512,35 +563,35 @@ if (!app.requestSingleInstanceLock()) {
     });
     ipcMain.handle("player:open", (_e, steamId: unknown) => {
       const url = controller.playerUrl(String(steamId ?? ""));
-      if (url) void shell.openExternal(url);
+      if (url) openSafeExternal(url);
     });
     ipcMain.handle("player:add", (_e, input: unknown) => (typeof input === "string" ? controller.addPlayer(input) : false));
     ipcMain.handle("player:remove", (_e, steamId: unknown) => { if (typeof steamId === "string") controller.removePlayer(steamId); });
     ipcMain.handle("leetify:open", () => {
-      void shell.openExternal("https://leetify.com/");
+      openSafeExternal("https://leetify.com/");
     });
     ipcMain.handle("leetify:developer", () => {
-      void shell.openExternal("https://leetify.com/app/developer");
+      openSafeExternal("https://leetify.com/app/developer");
     });
     ipcMain.handle("steam:set-key", (_e, key: unknown) =>
       (typeof key === "string" ? controller.setSteamApiKey(key) : false));
     ipcMain.handle("steam:clear-key", () => controller.clearSteamApiKey());
     ipcMain.handle("steam:open-developer", () => {
-      void shell.openExternal("https://steamcommunity.com/dev/apikey");
+      openSafeExternal("https://steamcommunity.com/dev/apikey");
     });
     ipcMain.handle("csrep:set-key", (_e, key: unknown) =>
       (typeof key === "string" ? controller.setCsrepKey(key) : false));
     ipcMain.handle("csrep:clear-key", () => controller.clearCsrepKey());
     ipcMain.handle("csrep:open-player", (_e, steamId: unknown) => {
       const url = controller.csrepPlayerUrl(String(steamId ?? ""));
-      if (url) void shell.openExternal(url);
+      if (url) openSafeExternal(url);
     });
     ipcMain.handle("csrep:open-docs", () => {
-      void shell.openExternal(CSREP_DOCS_URL);
+      openSafeExternal(CSREP_DOCS_URL);
     });
     ipcMain.handle("update:check", () => checkUpdate(controller));
     ipcMain.handle("update:open-releases", () => {
-      void shell.openExternal(`https://github.com/${OWNER}/${REPO}/releases`);
+      openSafeExternal(`https://github.com/${OWNER}/${REPO}/releases`);
     });
 
     // The window follows the fallback's status, and a broken one shows up now, not at the first unknown player.
@@ -556,6 +607,7 @@ if (!app.requestSingleInstanceLock()) {
     globalShortcut.unregisterAll();
     waylandOverlay?.dispose();
     waylandOverlay = null;
+    stopCoplayWorker();
     controller?.stop();
   });
   app.on("window-all-closed", () => app.quit());

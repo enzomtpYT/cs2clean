@@ -29,20 +29,38 @@ function readRaw(file: string): Record<string, unknown> {
   }
 }
 
+function decryptKey(enc: unknown, plain: unknown, keychain: KeyCrypto): string | null {
+  if (typeof enc === "string" && enc && keychain.isAvailable()) {
+    try {
+      return keychain.decrypt(enc);
+    } catch {
+      // One unreadable keychain entry must not wipe out the remaining settings.
+    }
+  }
+  return typeof plain === "string" && plain ? plain : null;
+}
+
 /** The API keys are encrypted with the OS keychain when there is one, and stored as plain text when there isn't. */
 export function settingsFileStore(file: string, keychain: KeyCrypto): SettingsStore {
   return {
     load(): Settings {
       if (!existsSync(file)) return {};
       try {
-        const raw = JSON.parse(readFileSync(file, "utf8"));
-        let leetifyKey: string | null = raw.leetifyKey ?? null;
-        if (raw.leetifyKeyEnc && keychain.isAvailable()) leetifyKey = keychain.decrypt(raw.leetifyKeyEnc);
-        let steamApiKey: string | null = raw.steamApiKey ?? null;
-        if (raw.steamApiKeyEnc && keychain.isAvailable()) steamApiKey = keychain.decrypt(raw.steamApiKeyEnc);
-        let csrepApiKey: string | null = raw.csrepApiKey ?? null;
-        if (raw.csrepApiKeyEnc && keychain.isAvailable()) csrepApiKey = keychain.decrypt(raw.csrepApiKeyEnc);
-        return { leetifyKey, steamApiKey, csrepApiKey, siren: raw.siren, autoOpenFriendsList: raw.autoOpenFriendsList, hotkeys: raw.hotkeys };
+        const raw = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
+        if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+        const leetifyKey = decryptKey(raw.leetifyKeyEnc, raw.leetifyKey, keychain);
+        const steamApiKey = decryptKey(raw.steamApiKeyEnc, raw.steamApiKey, keychain);
+        const csrepApiKey = decryptKey(raw.csrepApiKeyEnc, raw.csrepApiKey, keychain);
+        return {
+          leetifyKey,
+          steamApiKey,
+          csrepApiKey,
+          siren: typeof raw.siren === "boolean" ? raw.siren : undefined,
+          autoOpenFriendsList: typeof raw.autoOpenFriendsList === "boolean" ? raw.autoOpenFriendsList : undefined,
+          hotkeys: raw.hotkeys && typeof raw.hotkeys === "object" && !Array.isArray(raw.hotkeys)
+            ? (raw.hotkeys as Settings["hotkeys"])
+            : undefined,
+        };
       } catch {
         return {};
       }
@@ -57,7 +75,7 @@ export function settingsFileStore(file: string, keychain: KeyCrypto): SettingsSt
       else if (s.csrepApiKey) out.csrepApiKey = s.csrepApiKey;
       // What this store doesn't own stays as it was.
       for (const [k, v] of Object.entries(readRaw(file))) if (!OWN_KEYS.has(k)) out[k] = v;
-      writeFileSync(file, JSON.stringify(out, null, 2));
+      writeFileSync(file, JSON.stringify(out, null, 2), { encoding: "utf8", mode: 0o600 });
     },
   };
 }

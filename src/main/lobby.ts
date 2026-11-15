@@ -8,6 +8,7 @@ import { MAX_LOOKUPS } from "../shared/lobby-size";
 import { isSameMatch } from "../shared/match-identity";
 import type { PlayerReputation } from "../shared/reputation-types";
 import type { CsrepSummary, EvidenceClass, LobbyRow, MatchState, PlayerDetail, RosterPlayer } from "../shared/types";
+import type { CachedPlayerEntry, PlayerCacheStore } from "./player-cache";
 import { groupPlayers } from "./steam/friends";
 
 /** What a lookup says about one player. */
@@ -50,18 +51,7 @@ export type Lookup = (steamIds: string[], onEarly?: (answers: LobbyAnswer[]) => 
  */
 export class LookupBlocked extends Error {}
 
-interface Cached {
-  classification: EvidenceClass | null;
-  totalMatches: number;
-  name: string | null;
-  detail: PlayerDetail | null;
-  reputation: PlayerReputation | null;
-  csrep: CsrepSummary | null;
-  note: string | null;
-  at: number;
-  /** Replaces the cache time for this entry; see LobbyAnswer.recheckAfterMs. */
-  recheckAfterMs: number | null;
-}
+type Cached = CachedPlayerEntry;
 
 const UNKNOWN_NAME = "Unknown player";
 
@@ -94,6 +84,8 @@ export interface LobbyOptions {
   onFriendshipKeyError?: (message: string) => void;
   /** Try friendship grouping again after this long when Steam couldn't answer for everybody (ms). */
   friendshipRetryMs?: number;
+  /** Optional persistent cache store hydrated on startup and updated when settled entries arrive. */
+  cacheStore?: PlayerCacheStore;
   now?: () => number;
 }
 
@@ -128,8 +120,15 @@ export class LobbyService {
   private friendshipRetriesLeft = 0;
   private friendshipRetryTimer: NodeJS.Timeout | null = null;
   private disposed = false;
+  private saveTimer: NodeJS.Timeout | null = null;
 
-  constructor(private lookup: Lookup, private onChange: () => void, private opts: LobbyOptions = {}) {}
+  constructor(private lookup: Lookup, private onChange: () => void, private opts: LobbyOptions = {}) {
+    if (opts.cacheStore) {
+      for (const [id, entry] of opts.cacheStore.load()) {
+        this.cache.set(id, entry);
+      }
+    }
+  }
 
   private get now(): number {
     return (this.opts.now ?? Date.now)();
@@ -196,6 +195,7 @@ export class LobbyService {
   clear(): void {
     if (this.disposed) return;
     this.cache.clear();
+    this.scheduleCacheSave(0);
     this.failed.clear();
     this.error = null;
     this.updatedAt = null;
@@ -322,6 +322,7 @@ export class LobbyService {
         this.failed.delete(a.steamId);
         if (a.steamId === this.opts.localSteamId) localAnswered = true;
       }
+      this.scheduleCacheSave();
       this.error = problem;
       this.updatedAt = new Date(at).toISOString();
       // The local player is looked up once per match, but only an answer counts: a refused lookup is asked again.
@@ -376,6 +377,7 @@ export class LobbyService {
       any = true;
     }
     if (!any) return;
+    this.scheduleCacheSave();
     this.updatedAt = new Date(at).toISOString();
     this.onChange();
   }
@@ -452,6 +454,20 @@ export class LobbyService {
     }, this.opts.friendshipRetryMs ?? FRIENDSHIP_RETRY_MS);
   }
 
+  private scheduleCacheSave(delayMs = 500): void {
+    if (!this.opts.cacheStore || this.disposed) return;
+    if (this.saveTimer) clearTimeout(this.saveTimer);
+    if (delayMs <= 0) {
+      this.saveTimer = null;
+      this.opts.cacheStore.save(this.cache);
+      return;
+    }
+    this.saveTimer = setTimeout(() => {
+      this.saveTimer = null;
+      this.opts.cacheStore?.save(this.cache);
+    }, delayMs);
+  }
+
   /** Stops for good: nothing is scheduled again, and a lookup or grouping still out is answered into the void. */
   dispose(): void {
     this.disposed = true;
@@ -460,5 +476,10 @@ export class LobbyService {
     this.friendshipRetryTimer = null;
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
+    if (this.saveTimer) {
+      clearTimeout(this.saveTimer);
+      this.saveTimer = null;
+      this.opts.cacheStore?.save(this.cache);
+    }
   }
 }

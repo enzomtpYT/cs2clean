@@ -1,4 +1,4 @@
-import { StrictMode, useState } from "react";
+import { memo, StrictMode, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { DEFAULT_HOTKEYS, hotkeyFromEvent, type HotkeyName } from "../shared/hotkeys";
 import type { AppState, LobbyRow } from "../shared/types";
@@ -345,16 +345,34 @@ function AddPlayerForm() {
 
 function LobbyTable({ rows }: { rows: LobbyRow[] }) {
   // How many players of the lobby are in each group of friends (the group can span both teams).
-  const groupSizes = new Map<string, number>();
-  for (const r of rows) if (r.groupId) groupSizes.set(r.groupId, (groupSizes.get(r.groupId) ?? 0) + 1);
-  const teams: [string, LobbyRow[]][] = [
-    ["Counter-Terrorists", rows.filter((r) => r.side === "CT")],
-    ["Terrorists", rows.filter((r) => r.side === "T")],
-    [rows.some((r) => r.side) ? "Other" : "Players", rows.filter((r) => !r.side)],
-  ];
+  const { groupSizes, teams } = useMemo(() => {
+    const sizes = new Map<string, number>();
+    const ct: LobbyRow[] = [];
+    const t: LobbyRow[] = [];
+    const other: LobbyRow[] = [];
+    let hasSide = false;
+    for (const r of rows) {
+      if (r.groupId) sizes.set(r.groupId, (sizes.get(r.groupId) ?? 0) + 1);
+      if (r.side === "CT") {
+        hasSide = true;
+        ct.push(r);
+      } else if (r.side === "T") {
+        hasSide = true;
+        t.push(r);
+      } else {
+        other.push(r);
+      }
+    }
+    const grouped: [string, LobbyRow[]][] = [
+      ["Counter-Terrorists", ct],
+      ["Terrorists", t],
+      [hasSide ? "Other" : "Players", other],
+    ];
+    return { groupSizes: sizes, teams: grouped.filter(([, list]) => list.length > 0) };
+  }, [rows]);
   return (
     <div className="lobby">
-      {teams.filter(([, list]) => list.length).map(([label, list]) => (
+      {teams.map(([label, list]) => (
         <div key={label} className="team">
           <div className="team-label">{label}</div>
           {list.map((r) => <LobbyLine key={r.slot} r={r} groupSize={r.groupId ? groupSizes.get(r.groupId) ?? 0 : 0} />)}
@@ -364,7 +382,7 @@ function LobbyTable({ rows }: { rows: LobbyRow[] }) {
   );
 }
 
-function LobbyLine({ r, groupSize }: { r: LobbyRow; groupSize: number }) {
+const LobbyLine = memo(function LobbyLine({ r, groupSize }: { r: LobbyRow; groupSize: number }) {
   const groupStyle = r.groupId ? { borderLeftColor: groupColor(r.groupId) } : undefined;
   return (
     <div className={`player${r.isLocal ? " is-local" : ""}`} style={groupStyle}>
@@ -403,7 +421,7 @@ function LobbyLine({ r, groupSize }: { r: LobbyRow; groupSize: number }) {
       )}
     </div>
   );
-}
+});
 
 const modeName = (m: string | null) => (m ? m.charAt(0).toUpperCase() + m.slice(1).replace(/_/g, " ") : null);
 

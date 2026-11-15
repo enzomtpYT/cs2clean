@@ -3,7 +3,7 @@
 // card (yours too), one at a time; Shift+F6 steps backward. It shows itself in warm-up, hides when the match
 // goes live, and plays a siren when a HIGH or VERY_HIGH player is found.
 
-import { StrictMode, useEffect, useRef } from "react";
+import { memo, StrictMode, useEffect, useMemo, useRef } from "react";
 import { createRoot } from "react-dom/client";
 import { cycleHints } from "../shared/lobby-order";
 import type { AppState, AxisLevel, LobbyRow } from "../shared/types";
@@ -65,13 +65,21 @@ function waitingText(s: AppState): string {
 }
 
 function Body({ s }: { s: AppState }) {
+  const teams = useMemo(() => {
+    const ct: LobbyRow[] = [];
+    const t: LobbyRow[] = [];
+    const other: LobbyRow[] = [];
+    for (const r of s.lobby.rows) {
+      if (r.side === "CT") ct.push(r);
+      else if (r.side === "T") t.push(r);
+      else other.push(r);
+    }
+    return [ct, t, other].filter((l) => l.length > 0);
+  }, [s.lobby.rows]);
   if (s.lobby.rows.length === 0) return <p className="ov-msg">{waitingText(s)}</p>;
-  const ct = s.lobby.rows.filter((r) => r.side === "CT");
-  const t = s.lobby.rows.filter((r) => r.side === "T");
-  const other = s.lobby.rows.filter((r) => !r.side);
   return (
     <div className="ov-list">
-      {[ct, t, other].filter((l) => l.length).map((list, i) => (
+      {teams.map((list, i) => (
         <div key={i} className="ov-team">{list.map((r) => <Line key={r.slot} r={r} />)}</div>
       ))}
       {s.lobby.error && <p className="ov-msg ov-error">{s.lobby.error}</p>}
@@ -81,7 +89,7 @@ function Body({ s }: { s: AppState }) {
   );
 }
 
-function Line({ r }: { r: LobbyRow }) {
+const Line = memo(function Line({ r }: { r: LobbyRow }) {
   const groupStyle = r.groupId ? { borderLeftColor: groupColor(r.groupId) } : undefined;
   return (
     <div className={`ov-row${r.isLocal ? " is-local" : ""}`} style={groupStyle}>
@@ -95,7 +103,7 @@ function Line({ r }: { r: LobbyRow }) {
       <PlayerClass r={r} compact />
     </div>
   );
-}
+});
 
 // ------------------------------------------------------------------ F7 and F6: player cards
 

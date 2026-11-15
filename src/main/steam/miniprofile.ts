@@ -20,10 +20,14 @@ export function accountId(steamId64: string): string | null {
   return n > 0n ? n.toString() : null;
 }
 
+function safeFromCodePoint(cp: number, fallback: string): string {
+  return Number.isInteger(cp) && cp >= 0 && cp <= 0x10ffff ? String.fromCodePoint(cp) : fallback;
+}
+
 function decodeEntities(s: string): string {
   return s
-    .replace(/&#x([0-9a-f]+);/gi, (_, h: string) => String.fromCodePoint(parseInt(h, 16)))
-    .replace(/&#(\d+);/g, (_, d: string) => String.fromCodePoint(Number(d)))
+    .replace(/&#x([0-9a-f]+);/gi, (full, h: string) => safeFromCodePoint(parseInt(h, 16), full))
+    .replace(/&#(\d+);/g, (full, d: string) => safeFromCodePoint(Number(d), full))
     .replace(/&quot;/g, '"').replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
 }
 

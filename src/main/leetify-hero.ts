@@ -38,7 +38,8 @@ export type FetchImpl = (input: string | URL | Request, init?: RequestInit) => P
 const DEFAULT_ORIGIN = "https://csst.at";
 const REQUEST_TIMEOUT_MS = 20_000;
 /** The pause between one player's request to csst.at and the next, in ms. csst.at is a website, not an API: go easy on it. */
-export const SCRAPE_DELAY_MS = 4000;
+export const SCRAPE_DELAY_MS = 1200;
+const SCRAPE_CONCURRENCY = 2;
 
 let fetchOverride: FetchImpl | null = null;
 let originOverride: string | null = null;
@@ -103,47 +104,57 @@ export async function scrapeCsstAtProfiles(steamIds: string[], delayMs = SCRAPE_
   const errors = new Map<string, string>();
 
   try {
-    for (let i = 0; i < steamIds.length; i++) {
-      const sid = steamIds[i];
-      const profileUrl = `${origin}/profile/${sid}`;
-      const elementId = `leetify-extra-meta-${sid}`;
-      try {
-        debug("hero", "Fetching", sid);
-        const res = await fetchImpl(`${origin}/${sid}/leetify-extra`, {
-          headers: {
-            "HX-Request": "true",
-            "HX-Trigger": elementId,
-            "HX-Target": elementId,
-            "HX-Current-URL": profileUrl,
-            Referer: profileUrl,
-            Accept: "*/*",
-          },
-          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-        });
-        debug("hero", sid, "→ status", res.status);
-        if (res.status === 200) {
-          const profile = parseCsstAtHtml(await res.text(), sid);
-          debug("hero", sid, "→ parsed:", profile ? "profile" : "null");
-          if (profile) profiles.set(sid, profile);
-        } else if (res.status !== 404) {
-          const body = res.status === 403 ? await res.text().catch(() => "") : "";
-          const msg = res.status === 403 && isCloudflareChallenge(res, body)
-            ? "Cloudflare challenge (HTTP 403)"
-            : `HTTP ${res.status}`;
+    let next = 0;
+    let cloudflareBlocked = false;
+
+    const worker = async () => {
+      while (next < steamIds.length && !cloudflareBlocked) {
+        const i = next++;
+        const sid = steamIds[i];
+        const profileUrl = `${origin}/profile/${sid}`;
+        const elementId = `leetify-extra-meta-${sid}`;
+        try {
+          debug("hero", "Fetching", sid);
+          const res = await fetchImpl(`${origin}/${sid}/leetify-extra`, {
+            headers: {
+              "HX-Request": "true",
+              "HX-Trigger": elementId,
+              "HX-Target": elementId,
+              "HX-Current-URL": profileUrl,
+              Referer: profileUrl,
+              Accept: "*/*",
+            },
+            signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+          });
+          debug("hero", sid, "→ status", res.status);
+          if (res.status === 200) {
+            const profile = parseCsstAtHtml(await res.text(), sid);
+            debug("hero", sid, "→ parsed:", profile ? "profile" : "null");
+            if (profile) profiles.set(sid, profile);
+          } else if (res.status !== 404) {
+            const body = res.status === 403 ? await res.text().catch(() => "") : "";
+            const cf = res.status === 403 && isCloudflareChallenge(res, body);
+            const msg = cf ? "Cloudflare challenge (HTTP 403)" : `HTTP ${res.status}`;
+            errors.set(sid, msg);
+            if (cf) cloudflareBlocked = true;
+          }
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          debug("hero", sid, "→ fetch error:", msg);
           errors.set(sid, msg);
         }
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        debug("hero", sid, "→ fetch error:", msg);
-        errors.set(sid, msg);
-      }
 
-      if (i < steamIds.length - 1 && delayMs > 0) {
-        await new Promise((r) => setTimeout(r, delayMs));
+        if (next < steamIds.length && !cloudflareBlocked && delayMs > 0) {
+          const jitter = Math.floor(Math.random() * 400);
+          await new Promise((r) => setTimeout(r, delayMs + jitter));
+        }
       }
-    }
+    };
 
-    if (errors.size > 0 && errors.size === steamIds.length) {
+    const workers = Math.max(1, Math.min(SCRAPE_CONCURRENCY, steamIds.length));
+    await Promise.all(Array.from({ length: workers }, worker));
+
+    if (errors.size > 0 && (errors.size === steamIds.length || cloudflareBlocked)) {
       const firstErr = errors.values().next().value ?? "Unknown error";
       const problem: HeroProblem = firstErr.toLowerCase().includes("timeout") || firstErr.toLowerCase().includes("aborted")
         ? "timeout"

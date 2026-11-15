@@ -99,6 +99,7 @@ export class CsrepClient {
           "X-API-Key": this.apiKey,
           Accept: "application/json",
         },
+        signal: AbortSignal.timeout(12_000),
       });
     } catch (e) {
       throw new CsrepError("network", `CSRep request failed: ${e instanceof Error ? e.message : String(e)}`);
