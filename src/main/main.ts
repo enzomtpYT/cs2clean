@@ -14,7 +14,7 @@
 // default overlay is an ordinary see-through, click-through window kept on top of the game, which works
 // when CS2 runs in "Fullscreen Windowed" mode.
 
-import { app, BrowserWindow, globalShortcut, ipcMain, safeStorage, screen, shell, utilityProcess } from "electron";
+import { app, BrowserWindow, globalShortcut, ipcMain, net, safeStorage, screen, shell, utilityProcess } from "electron";
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Hotkeys } from "../shared/hotkeys";
@@ -424,8 +424,8 @@ if (!app.requestSingleInstanceLock()) {
   app.whenReady().then(() => {
     const source = gameSource();
     if (arg("record")) console.log("recording to", record(source, join(app.getPath("userData"), "recordings")));
-    // The csst.at fallback keeps its log, its Chrome download and (on Mint) a cat shim under the app's data folder.
-    configureHero({ dataDir: app.getPath("userData") });
+    // The csst.at fallback uses Electron's net.fetch (Chromium's network stack) in-process.
+    configureHero({ fetchImpl: net.fetch.bind(net) as typeof fetch });
     sirenIgnore = new SirenIgnoreList(join(app.getPath("userData"), SIREN_IGNORE_FILE));
     sirenIgnore.ensureFile();
     controller = new Controller({

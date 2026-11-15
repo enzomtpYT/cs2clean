@@ -268,7 +268,7 @@ describe("lookupLobby", () => {
         expect(out[0].note).toContain("stopped unexpectedly");
       });
 
-    it.each<HeroProblem>(["browser-missing", "site-unreachable", "timeout"])(
+    it.each<HeroProblem>(["site-unreachable", "timeout"])(
       "asks again later when the problem can clear up by itself (%s)", async (problem) => {
         const sc = scraper({}, broken(problem, "try later"));
         const out = await lookupLobby(new LeetifyClient("k", fake({}).fetchImpl), [ID(1)], { scrape: sc.scrape });

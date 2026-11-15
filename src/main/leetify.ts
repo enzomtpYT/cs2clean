@@ -216,7 +216,7 @@ export interface LookupOptions {
 }
 
 /** Fallback problems that can clear up by themselves: the lobby asks again later instead of settling on "no data". */
-const FALLBACK_RETRYABLE: readonly HeroProblem[] = ["browser-missing", "site-unreachable", "timeout"];
+const FALLBACK_RETRYABLE: readonly HeroProblem[] = ["site-unreachable", "timeout"];
 const FALLBACK_RETRY_MS = 60_000;
 /**
  * Every other fallback problem (the sidecar crashed, wouldn't start, was built for another Node...) settles the answer
