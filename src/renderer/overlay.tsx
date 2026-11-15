@@ -100,7 +100,7 @@ const Line = memo(function Line({ r }: { r: LobbyRow }) {
     <div className={`ov-row${r.isLocal ? " is-local" : ""}`} style={groupStyle}>
       <SideEmblem side={r.side} size={14} />
       <span className="ov-name">{r.name}</span>
-      <PlayerRanks m={r.detail?.metrics} compact />
+      <PlayerRanks m={r.detail?.metrics} faceit={r.faceit} compact />
       {r.groupName && <span className="ov-group-badge" title={`${r.groupName} in this lobby`}>{r.groupName}</span>}
       {r.via === "profile" && <span className="ov-group-badge" title="Found from Steam's profile page, which can be ten minutes out of date: this friend may not be in your match">maybe</span>}
       {r.via === "manual" && <span className="ov-group-badge" title="Added by hand">added</span>}
@@ -169,7 +169,7 @@ function Card({ r, compact }: { r: LobbyRow; compact?: boolean }) {
     <section className={`ov-card${r.classification ? ` tone-${r.classification.toLowerCase()}` : ""}`}>
       <div className="ov-card-head">
         <span className="ov-name">{r.name}{r.isLocal && <span className="you"> (you)</span>}</span>
-        <PlayerRanks m={m} compact />
+        <PlayerRanks m={m} faceit={r.faceit} compact />
         <span className="row-spacer" />
         {r.classification && r.classification !== "INSUFFICIENT_DATA" && <ClassBadge value={r.classification} compact />}
       </div>

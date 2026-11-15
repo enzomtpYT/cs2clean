@@ -125,6 +125,7 @@ function simulated(): Bridge {
     },
     steam: { hasKey: false },
     csrep: { hasProxy: false, proxyUrl: null, reachable: null },
+    faceit: { hasKey: false, reachable: null },
     notice: null,
     game: {
       source: "steam",
@@ -210,6 +211,13 @@ function simulated(): Bridge {
     },
     clearFlaresolverrUrl: async () => set({ csrep: { hasProxy: false, proxyUrl: null, reachable: null } }),
     openCsrepPlayer: async () => {},
+    setFaceitApiKey: async (key) => {
+      if (!key.trim()) return false;
+      set({ faceit: { hasKey: true, reachable: null } });
+      return true;
+    },
+    clearFaceitApiKey: async () => set({ faceit: { hasKey: false, reachable: null } }),
+    openFaceitDeveloper: async () => {},
     updateCheck: async () => ({ status: "current" }),
     openReleases: async () => {},
   };

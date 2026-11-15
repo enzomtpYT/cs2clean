@@ -184,12 +184,23 @@ describe("assessReputation", () => {
     expect(r.score).toBe(null);
   });
 
-  it("treats a private profile as UNKNOWN, but a ban as decisive even on one", () => {
+  it("treats a private profile without bans as UNKNOWN, and applies a local penalty for a ban", () => {
     expect(assessReputation({ privacy_mode: "private", recent_matches: [] }).tier).toBe("UNKNOWN");
     const r = assessReputation(BANNED);
-    expect(r.tier).toBe("BANNED");
-    expect(r.score).toBe(0);
-    expect(r.reasons[0]).toMatch(/Ban on record \(steam\) since 2026-08-14/);
+    expect(r.tier).toBe("NORMAL");
+    expect(r.score).toBe(85);
+    expect(r.reasons[0]).toMatch(/Ban on record \(steam\) since 2026-08-14 \(-15\)/);
+
+    const multiBanned = assessReputation({
+      ...BANNED,
+      bans: [
+        { platform: "steam", banned_since: "2026-08-14T00:00:00.000Z" },
+        { platform: "faceit", banned_since: "2026-08-15T00:00:00.000Z" },
+        { platform: "esportal", banned_since: "2026-08-16T00:00:00.000Z" },
+      ],
+    });
+    expect(multiBanned.score).toBe(65); // capped at -35
+    expect(multiBanned.tier).toBe("NORMAL");
   });
 });
 
@@ -237,7 +248,7 @@ describe("combineClass", () => {
   it("takes the more severe class and never lowers one", () => {
     expect(combineClass("NORMAL", assessReputation(RAGER))).toBe("VERY_HIGH");
     expect(combineClass("HIGH", assessReputation(ORDINARY))).toBe("HIGH");
-    expect(combineClass("INSUFFICIENT_DATA", assessReputation(BANNED))).toBe("VERY_HIGH");
+    expect(combineClass("INSUFFICIENT_DATA", assessReputation(BANNED))).toBe("NORMAL");
     expect(combineClass("INSUFFICIENT_DATA", assessReputation({ privacy_mode: "private" }))).toBe("INSUFFICIENT_DATA");
   });
 });
@@ -255,9 +266,10 @@ describe("lookupLobby and LobbyService", () => {
     expect(ok.reputation?.tier).toBe("TRUSTED");
     expect(rager.classification).toBe("VERY_HIGH");
     expect(rager.reputation?.tier).toBe("VERY_SUSPICIOUS");
-    expect(banned.classification).toBe("VERY_HIGH");
-    expect(banned.reputation?.tier).toBe("BANNED");
-    expect(banned.note).toMatch(/Ban on record/);
+    expect(banned.classification).toBe("NORMAL");
+    expect(banned.reputation?.tier).toBe("NORMAL");
+    expect(banned.reputation?.score).toBe(85);
+    expect(banned.reputation?.reasons[0]).toMatch(/Ban on record/);
   });
 
   it("gives a player flagged by reputation the performance card too, but a banned private profile only the ban", async () => {
@@ -276,7 +288,7 @@ describe("lookupLobby and LobbyService", () => {
       players: Object.keys(profiles).map((steamId, i) => ({ steamId, name: `P${i}` })) } as never);
     await new Promise((r) => setTimeout(r, 50));
     const rows = lobby.rows();
-    expect(rows.map((r) => r.reputation?.tier)).toEqual(["TRUSTED", "VERY_SUSPICIOUS", "BANNED"]);
+    expect(rows.map((r) => r.reputation?.tier)).toEqual(["TRUSTED", "VERY_SUSPICIOUS", "NORMAL"]);
     lobby.dispose();
   });
 });

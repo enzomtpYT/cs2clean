@@ -230,12 +230,24 @@ function shiftEffect(a: M[], b: M[]): number | null {
   return ds.length >= 2 ? mean(ds) : null;
 }
 
-function banned(bans: LeetifyBan[]): Reputation {
+export const BAN_PENALTY_PER_BAN = 15;
+export const BAN_PENALTY_CAP = 35;
+
+export function scoreToTier(score: number): ReputationTier {
+  const { tiers } = REPUTATION;
+  return score >= tiers.trusted ? "TRUSTED"
+    : score >= tiers.normal ? "NORMAL"
+      : score >= tiers.watch ? "WATCH"
+        : score >= tiers.suspicious ? "SUSPICIOUS"
+          : "VERY_SUSPICIOUS";
+}
+
+function formatLeetifyBanReason(bans: LeetifyBan[], penalty: number): string {
   const since = bans.map((b) => Date.parse(b.banned_since ?? "")).filter(num);
   const platforms = Array.from(new Set(bans.map((b) => b.platform).filter((x): x is string => !!x)));
-  const text = "Ban on record" + (platforms.length ? ` (${platforms.join(", ")})` : "") +
-    (since.length ? ` since ${new Date(Math.min(...since)).toISOString().slice(0, 10)}` : "");
-  return { score: 0, tier: "BANNED", confidence: 1, matchesAnalyzed: 0, reasons: [text], note: null, trace: null };
+  return "Ban on record" + (platforms.length ? ` (${platforms.join(", ")})` : "") +
+    (since.length ? ` since ${new Date(Math.min(...since)).toISOString().slice(0, 10)}` : "") +
+    ` (-${penalty})`;
 }
 
 function unknown(note: string, matchesAnalyzed: number): Reputation {
@@ -244,10 +256,24 @@ function unknown(note: string, matchesAnalyzed: number): Reputation {
 
 export function assessReputation(p: LeetifyProfile): Reputation {
   const T = REPUTATION;
-
-  // A ban is checked first: it needs no match data, and a private profile can still carry one.
   const bans = (p.bans ?? []).filter((b): b is LeetifyBan => !!b);
-  if (bans.length > 0) return banned(bans);
+  const banPenalty = bans.length > 0 ? Math.min(BAN_PENALTY_CAP, bans.length * BAN_PENALTY_PER_BAN) : 0;
+
+  const applyBanPenalty = (rep: Reputation): Reputation => {
+    if (banPenalty === 0) return rep;
+    const baseScore = rep.score ?? 100;
+    const nextScore = Math.max(0, baseScore - banPenalty);
+    let nextTier = scoreToTier(nextScore);
+    if (nextTier === "TRUSTED") nextTier = "NORMAL";
+    const reason = formatLeetifyBanReason(bans, banPenalty);
+    return {
+      ...rep,
+      score: nextScore,
+      tier: nextTier,
+      confidence: rep.score === null ? 0.5 : rep.confidence,
+      reasons: [reason, ...rep.reasons.filter((r) => r !== reason)].slice(0, 4),
+    };
+  };
 
   const ratedAll = (p.recent_matches ?? [])
     .filter((m): m is LeetifyRecentMatch & { leetify_rating: number } => !!m && num(m.leetify_rating))
@@ -261,7 +287,7 @@ export function assessReputation(p: LeetifyProfile): Reputation {
   const aggregateOnly = ratedAll.length < T.minMatches;
   const rated = aggregateOnly ? [] : ratedAll;
   const sample = aggregateOnly ? (num(p.total_matches) ? p.total_matches : 0) : rated.length;
-  if (aggregateOnly && sample < T.minMatches) return unknown(`Only ${sample} matches on this profile`, ratedAll.length);
+  if (aggregateOnly && sample < T.minMatches) return applyBanPenalty(unknown(`Only ${sample} matches on this profile`, ratedAll.length));
 
   // Units. The API's scales are unverified (see assess.ts): rating-type values may be fractions or website units,
   // percent-type values fractions or percentages, reaction time milliseconds or seconds. Each is decided from the
@@ -385,7 +411,7 @@ export function assessReputation(p: LeetifyProfile): Reputation {
   if (gap !== null)
     add("divergence", "trajectory", ramp(gap, Tr.divergence), `Far better outside FACEIT than in FACEIT matches (${f1(gap)} standard deviations)`);
 
-  if (aggregateOnly && signals.length === 0) return unknown("Leetify sent no usable stats for this player", sample);
+  if (aggregateOnly && signals.length === 0) return applyBanPenalty(unknown("Leetify sent no usable stats for this player", sample));
 
   // Families, then the combined score.
   const families = {} as Record<Family, number>;
@@ -425,7 +451,7 @@ export function assessReputation(p: LeetifyProfile): Reputation {
     .map((s) => s.text);
 
   const trace: ReputationTrace = { scales: { rating: ratingS, percent: { head: headS, spray: sprayS, stopping: stopS, opening: openS }, ms: msS }, band, families, adjusted, signals, thin, suspicion };
-  return { score, tier, confidence, matchesAnalyzed: ms.length, reasons, note: aggregateOnly ? "Scored from lifetime stats only (no match history)" : null, trace };
+  return applyBanPenalty({ score, tier, confidence, matchesAnalyzed: ms.length, reasons, note: aggregateOnly ? "Scored from lifetime stats only (no match history)" : null, trace });
 }
 
 /** Maps a reputation onto the app's existing class so lobby answers and the overlay work unchanged. */
@@ -447,17 +473,25 @@ export function toPlayerReputation(r: Reputation): PlayerReputation {
 
 /**
  * Enriches a player's reputation with scraped CSRep.GG signals without altering Leetify's statistical score math.
- * Any recorded CSRep ban overrides non-banned tiers to BANNED (score 0); flags, low CS2 hours, and low
- * trust score are appended as informational reasons.
+ * CSRep bans apply a local score penalty (-15 per ban, capped at -35) and derive the tier from the reduced score;
+ * flags, low CS2 hours, and low trust score are appended as informational reasons.
  */
 export function mergeCsrepReputation(base: PlayerReputation | null, csrep: CsrepProfile): PlayerReputation | null {
+  let score = base?.score ?? null;
+  let tier: ReputationTier = base?.tier ?? "UNKNOWN";
+  let confidence = base?.confidence ?? 0;
+  const extra: string[] = [];
+
   if (csrep.bansCount > 0) {
-    if (base?.tier === "BANNED") return base;
-    const text = `Ban on record (CSRep: ${csrep.bansCount} ban${csrep.bansCount === 1 ? "" : "s"})`;
-    return { score: 0, tier: "BANNED", confidence: 1, reasons: [text] };
+    const penalty = Math.min(BAN_PENALTY_CAP, csrep.bansCount * BAN_PENALTY_PER_BAN);
+    const baseScore = score ?? 100;
+    score = Math.max(0, baseScore - penalty);
+    tier = scoreToTier(score);
+    if (tier === "TRUSTED") tier = "NORMAL";
+    if (base?.score === null || base === null) confidence = Math.max(confidence, 0.5);
+    extra.push(`Ban on record (CSRep: ${csrep.bansCount} ban${csrep.bansCount === 1 ? "" : "s"}, -${penalty})`);
   }
 
-  const extra: string[] = [];
   if (csrep.flagsCount > 0) extra.push(`CSRep flagged (${csrep.flagsCount})`);
   if (csrep.cs2Hours !== null && csrep.cs2Hours > 0 && csrep.cs2Hours < 200) {
     extra.push(`Low CS2 hours (${Math.round(csrep.cs2Hours)}h on CSRep)`);
@@ -470,9 +504,9 @@ export function mergeCsrepReputation(base: PlayerReputation | null, csrep: Csrep
   const existing = base?.reasons ?? [];
   const mergedReasons = [...existing, ...extra.filter((r) => !existing.includes(r))];
   return {
-    score: base?.score ?? null,
-    tier: base?.tier ?? "UNKNOWN",
-    confidence: base?.confidence ?? 0,
+    score,
+    tier,
+    confidence,
     reasons: mergedReasons,
   };
 }

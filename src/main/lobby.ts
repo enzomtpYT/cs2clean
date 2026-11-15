@@ -7,7 +7,7 @@
 import { MAX_LOOKUPS } from "../shared/lobby-size";
 import { isSameMatch } from "../shared/match-identity";
 import type { PlayerReputation } from "../shared/reputation-types";
-import type { CsrepSummary, EvidenceClass, LobbyRow, MatchState, PlayerDetail, RosterPlayer } from "../shared/types";
+import type { CsrepSummary, EvidenceClass, FaceitRankInfo, LobbyRow, MatchState, PlayerDetail, RosterPlayer } from "../shared/types";
 import type { CachedPlayerEntry, PlayerCacheStore } from "./player-cache";
 import { groupPlayers } from "./steam/friends";
 
@@ -24,6 +24,8 @@ export interface LobbyAnswer {
   reputation?: PlayerReputation | null;
   /** Optional CSRep.GG enrichment (bans, autoflag, hours, Steam account age). */
   csrep?: CsrepSummary | null;
+  /** Optional direct FACEIT fallback rank when Leetify lacks FACEIT data (including NO_DATA players). */
+  faceit?: FaceitRankInfo | null;
   /** Why there's no class, or a problem to show. */
   note?: string | null;
   /** A temporary failure (rate limit, network): not remembered, asked again later. */
@@ -238,7 +240,7 @@ export class LobbyService {
           ...p,
           // Steam sometimes doesn't know a stranger's name yet; the server's last known name fills in.
           name: p.name === UNKNOWN_NAME && c.name ? c.name : p.name,
-          classification: c.classification, totalMatches: c.totalMatches, status: "ok", detail: c.detail, reputation: c.reputation, csrep: c.csrep, note: c.note,
+          classification: c.classification, totalMatches: c.totalMatches, status: "ok", detail: c.detail, reputation: c.reputation, csrep: c.csrep, faceit: c.faceit ?? null, note: c.note,
           groupId: this.friendshipGroups.get(p.steamId!)?.groupId ?? null,
           groupName: this.friendshipGroups.get(p.steamId!)?.groupName ?? null,
         };
@@ -356,7 +358,7 @@ export class LobbyService {
 
   private toCached(a: LobbyAnswer, at: number): Cached {
     return { classification: a.classification, totalMatches: a.totalMatches,
-             name: a.name ?? null, detail: a.detail ?? null, reputation: a.reputation ?? null, csrep: a.csrep ?? null, note: a.note ?? null, at,
+             name: a.name ?? null, detail: a.detail ?? null, reputation: a.reputation ?? null, csrep: a.csrep ?? null, faceit: a.faceit ?? null, note: a.note ?? null, at,
              recheckAfterMs: a.recheckAfterMs ?? null };
   }
 

@@ -41,6 +41,9 @@ const bridge: Bridge = {
   setFlaresolverrUrl: (url) => ipcRenderer.invoke("csrep:set-proxy", url),
   clearFlaresolverrUrl: () => ipcRenderer.invoke("csrep:clear-proxy"),
   openCsrepPlayer: (steamId) => ipcRenderer.invoke("csrep:open-player", steamId),
+  setFaceitApiKey: (key) => ipcRenderer.invoke("faceit:set-key", key),
+  clearFaceitApiKey: () => ipcRenderer.invoke("faceit:clear-key"),
+  openFaceitDeveloper: () => ipcRenderer.invoke("faceit:open-developer"),
   updateCheck: () => ipcRenderer.invoke("update:check"),
   openReleases: () => ipcRenderer.invoke("update:open-releases"),
 };

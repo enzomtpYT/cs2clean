@@ -4,7 +4,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import type { PlayerReputation } from "../shared/reputation-types";
-import type { CsrepSummary, EvidenceClass, PlayerDetail } from "../shared/types";
+import type { CsrepSummary, EvidenceClass, FaceitRankInfo, PlayerDetail } from "../shared/types";
 
 export interface CachedPlayerEntry {
   classification: EvidenceClass | null;
@@ -13,6 +13,7 @@ export interface CachedPlayerEntry {
   detail: PlayerDetail | null;
   reputation: PlayerReputation | null;
   csrep: CsrepSummary | null;
+  faceit?: FaceitRankInfo | null;
   note: string | null;
   at: number;
   recheckAfterMs: number | null;

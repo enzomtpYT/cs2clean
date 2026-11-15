@@ -8,9 +8,10 @@ import { isSameMatch } from "../shared/match-identity";
 import { pressViewKey } from "../shared/overlay-keys";
 import { MAX_MANUAL } from "../shared/lobby-size";
 import { parseSteamInput } from "../shared/steam-id";
-import type { AppState, LobbyRow, MatchState, SirenThreshold } from "../shared/types";
+import type { AppState, FaceitRankInfo, LobbyRow, MatchState, SirenThreshold } from "../shared/types";
 import type { GameSource } from "./game/source";
 import { CsrepError, CsrepScraper, normalizeFlaresolverrUrl, toCsrepSummary, type CsrepProfile } from "./csrep";
+import { FaceitClient, FaceitError } from "./faceit";
 import { LeetifyClient, LeetifyError, lookupLobby, type DataSource, type LookupOptions } from "./leetify";
 import { LobbyService, LookupBlocked, type LobbyAnswer, type LobbyOptions } from "./lobby";
 import { mergeCsrepReputation } from "./reputation";
@@ -26,6 +27,8 @@ export interface Settings {
   steamApiKey?: string | null;
   /** FlareSolverr proxy URL for CSRep.GG web scraping (e.g. http://localhost:8191). */
   flaresolverrUrl?: string | null;
+  /** The user's FACEIT Data API v4 key (https://developers.faceit.com). */
+  faceitKey?: string | null;
   /** Siren when a HIGH player is found (default on). */
   siren?: boolean;
   /** Siren volume from 0 to 1 (default 0.22). */
@@ -59,6 +62,8 @@ export interface ControllerDeps {
   steamApiKey?: string | null;
   /** FlareSolverr proxy URL from FLARESOLVERR_URL environment variable. */
   flaresolverrUrl?: string | null;
+  /** FACEIT Data API v4 key from FACEIT_API_KEY environment variable. */
+  faceitKey?: string | null;
   /** Optional fetch implementation for CSRep scraping (main.ts passes Electron's net.fetch). */
   csrepFetchImpl?: typeof fetch;
   overlay: Omit<AppState["overlay"], "sirenVolume" | "sirenThreshold" | "opacity" | "scale" | "autoHideOnLive">
@@ -80,6 +85,7 @@ export interface ControllerDeps {
 export class Controller extends EventEmitter<{ state: [AppState] }> {
   readonly leetify: LeetifyClient;
   readonly csrep: CsrepScraper;
+  readonly faceit: FaceitClient;
   private lobby: LobbyService;
   /** Takes this controller's listeners off the game source; null while they aren't on it (before start(), after stop()). */
   private detachSource: (() => void) | null = null;
@@ -101,6 +107,8 @@ export class Controller extends EventEmitter<{ state: [AppState] }> {
     this.leetify = new LeetifyClient(key, deps.fetchImpl);
     const proxyUrl = normalizeFlaresolverrUrl(this.settings.flaresolverrUrl || deps.flaresolverrUrl || "") ?? null;
     this.csrep = new CsrepScraper(proxyUrl, deps.csrepFetchImpl ?? deps.fetchImpl);
+    const faceitKey = this.settings.faceitKey || deps.faceitKey || null;
+    this.faceit = new FaceitClient(faceitKey, deps.fetchImpl);
     const steamKey = this.steamKey;
     this.lobby = this.createLobby();
     this.state = {
@@ -108,6 +116,7 @@ export class Controller extends EventEmitter<{ state: [AppState] }> {
       leetify: { hasKey: !!key, reachable: null, fallback: { working: null, reason: null } },
       steam: { hasKey: !!steamKey },
       csrep: { hasProxy: !!proxyUrl, proxyUrl, reachable: null },
+      faceit: { hasKey: !!faceitKey, reachable: null },
       notice: null,
       game: { source: deps.source.kind, running: false, problem: null, hint: null, rosterUnavailable: false },
       match: null,
@@ -274,6 +283,31 @@ export class Controller extends EventEmitter<{ state: [AppState] }> {
     this.csrep.flaresolverrUrl = fallbackUrl;
     this.csrep.resetClearance();
     this.update({ csrep: { hasProxy: !!fallbackUrl, proxyUrl: fallbackUrl, reachable: null } });
+    this.lobby.clear();
+  }
+
+  /** Saves a FACEIT Data API v4 key and clears the lobby cache so missing FACEIT ranks are re-checked. */
+  async setFaceitApiKey(raw: string): Promise<boolean> {
+    const trimmed = raw.trim();
+    if (!trimmed) {
+      this.update({ notice: "Paste a FACEIT API key first." });
+      return false;
+    }
+    this.settings = { ...this.settings, faceitKey: trimmed };
+    this.deps.store.save(this.settings);
+    this.faceit.apiKey = trimmed;
+    this.update({ faceit: { hasKey: true, reachable: null }, notice: null });
+    this.lobby.clear();
+    return true;
+  }
+
+  /** Removes the saved FACEIT Data API v4 key; FACEIT_API_KEY takes over if set. */
+  clearFaceitApiKey(): void {
+    this.settings = { ...this.settings, faceitKey: null };
+    this.deps.store.save(this.settings);
+    const fallbackKey = this.deps.faceitKey || null;
+    this.faceit.apiKey = fallbackKey;
+    this.update({ faceit: { hasKey: !!fallbackKey, reachable: null } });
     this.lobby.clear();
   }
 
@@ -582,10 +616,25 @@ export class Controller extends EventEmitter<{ state: [AppState] }> {
     }
   }
 
+  private async fetchFaceitSafe(steamIds: string[]): Promise<Map<string, FaceitRankInfo>> {
+    if (!this.faceit.apiKey?.trim() || steamIds.length === 0) return new Map();
+    try {
+      const map = await this.faceit.fetchPlayers(steamIds);
+      if (this.state.faceit.reachable !== true) this.update({ faceit: { ...this.state.faceit, reachable: true } });
+      return map;
+    } catch (e) {
+      const notice = e instanceof FaceitError && (e.status === 401 || e.status === 403)
+        ? message(e)
+        : this.state.notice;
+      this.update({ faceit: { ...this.state.faceit, reachable: false }, notice });
+      return new Map();
+    }
+  }
+
   private async lookup(steamIds: string[], onEarly?: (answers: LobbyAnswer[]) => void) {
     const csrepPromise = this.fetchCsrepSafe(steamIds);
     try {
-      const [answers, csrepMap] = await Promise.all([
+      const [rawAnswers, csrepMap] = await Promise.all([
         lookupLobby(this.leetify, steamIds, {
           concurrency: this.deps.leetifyConcurrency,
           scrape: this.deps.scrape,
@@ -600,8 +649,20 @@ export class Controller extends EventEmitter<{ state: [AppState] }> {
         }),
         csrepPromise,
       ]);
-      if (csrepMap.size === 0) return answers;
-      return answers.map((a) => enrichAnswerWithCsrep(a, a.steamId ? csrepMap.get(a.steamId) : undefined));
+      let answers = csrepMap.size === 0
+        ? rawAnswers
+        : rawAnswers.map((a) => enrichAnswerWithCsrep(a, a.steamId ? csrepMap.get(a.steamId) : undefined));
+
+      const missingFaceitIds = answers
+        .filter((a) => !a.transient && a.steamId && (a.detail?.metrics.faceit == null || a.detail?.metrics.faceitElo == null))
+        .map((a) => a.steamId!);
+      if (this.faceit.apiKey?.trim() && missingFaceitIds.length > 0) {
+        const faceitMap = await this.fetchFaceitSafe(missingFaceitIds);
+        if (faceitMap.size > 0) {
+          answers = answers.map((a) => enrichAnswerWithFaceit(a, a.steamId ? faceitMap.get(a.steamId) : undefined));
+        }
+      }
+      return answers;
     } catch (e) {
       // A missing or rejected key fails the same way every time: tell the lobby, which then waits for a new key (or a new match).
       if (e instanceof LeetifyError && e.kind === "invalid-key") throw new LookupBlocked(message(e));
@@ -624,10 +685,27 @@ export class Controller extends EventEmitter<{ state: [AppState] }> {
   }
 }
 
+function tierToEvidenceClass(tier: string | undefined): "NORMAL" | "ELEVATED" | "HIGH" | "VERY_HIGH" | "INSUFFICIENT_DATA" {
+  switch (tier) {
+    case "BANNED":
+    case "VERY_SUSPICIOUS": return "VERY_HIGH";
+    case "SUSPICIOUS": return "HIGH";
+    case "WATCH": return "ELEVATED";
+    case "UNKNOWN": return "INSUFFICIENT_DATA";
+    default: return "NORMAL";
+  }
+}
+
+const CLASS_SEVERITY = { INSUFFICIENT_DATA: -1, NORMAL: 0, ELEVATED: 1, HIGH: 2, VERY_HIGH: 3 } as const;
+
 function enrichAnswerWithCsrep(answer: LobbyAnswer, csrep: CsrepProfile | undefined): LobbyAnswer {
   if (!csrep) return answer;
   const reputation = mergeCsrepReputation(answer.reputation ?? null, csrep);
-  const classification = reputation?.tier === "BANNED" ? "VERY_HIGH" : answer.classification;
+  const fromRep = tierToEvidenceClass(reputation?.tier);
+  const baseSev = answer.classification ? CLASS_SEVERITY[answer.classification] : -2;
+  const classification = CLASS_SEVERITY[fromRep] > baseSev
+    ? fromRep
+    : answer.classification;
   let detail = answer.detail ?? null;
   if (detail) {
     const needsFallback =
@@ -652,6 +730,31 @@ function enrichAnswerWithCsrep(answer: LobbyAnswer, csrep: CsrepProfile | undefi
     reputation,
     detail,
     csrep: toCsrepSummary(csrep),
+  };
+}
+
+function enrichAnswerWithFaceit(answer: LobbyAnswer, info: FaceitRankInfo | undefined): LobbyAnswer {
+  if (!info) return answer;
+  let detail = answer.detail ?? null;
+  if (detail) {
+    const needsFallback =
+      (detail.metrics.faceit === null && info.level !== null) ||
+      (detail.metrics.faceitElo === null && info.elo !== null);
+    if (needsFallback) {
+      detail = {
+        ...detail,
+        metrics: {
+          ...detail.metrics,
+          faceit: detail.metrics.faceit ?? info.level,
+          faceitElo: detail.metrics.faceitElo ?? info.elo,
+        },
+      };
+    }
+  }
+  return {
+    ...answer,
+    detail,
+    faceit: info,
   };
 }
 

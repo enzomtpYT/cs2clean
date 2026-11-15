@@ -2,7 +2,7 @@
 // (same path and tier colours as leetify.com's cs-rating component, see the ".cs-rating" rules in style.css), and the
 // FACEIT level as its icon followed by the FACEIT Elo.
 
-import type { PlayerMetrics } from "../shared/types";
+import type { FaceitRankInfo, PlayerMetrics } from "../shared/types";
 
 /**
  * The FACEIT level icons, assets/faceit-ranks/faceit1.svg .. faceit10.svg. Vite bundles whichever of them exist, so
@@ -63,10 +63,20 @@ export function FaceitRank({ level, elo }: { level: number | null; elo: number |
  * Premier rating, FACEIT level and FACEIT Elo on one line, with no space between the Premier badge and the FACEIT
  * group. Nothing at all for a player who has none of the three. `compact` is the smaller size of the overlay.
  */
-export function PlayerRanks({ m, compact }: { m: PlayerMetrics | null | undefined; compact?: boolean }) {
+export function PlayerRanks({
+  m,
+  faceit,
+  compact,
+}: {
+  m: PlayerMetrics | null | undefined;
+  faceit?: FaceitRankInfo | null;
+  compact?: boolean;
+}) {
   const premier = num(m?.premier) && m.premier > 0 ? m.premier : null;
-  const level = num(m?.faceit) && m.faceit >= 1 && m.faceit < 11 ? Math.floor(m.faceit) : null;
-  const elo = num(m?.faceitElo) && m.faceitElo > 0 ? Math.round(m.faceitElo) : null;
+  const rawLevel = m?.faceit ?? faceit?.level;
+  const rawElo = m?.faceitElo ?? faceit?.elo;
+  const level = num(rawLevel) && rawLevel >= 1 && rawLevel < 11 ? Math.floor(rawLevel) : null;
+  const elo = num(rawElo) && rawElo > 0 ? Math.round(rawElo) : null;
   if (premier === null && level === null && elo === null) return null;
   return (
     <span className={`ranks${compact ? " ranks-compact" : ""}`}>

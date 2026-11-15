@@ -1,5 +1,5 @@
 import { memo, useMemo, useState } from "react";
-import { AlertTriangle, Crosshair, ExternalLink, Loader2, Search, Trash2, UserPlus } from "lucide-react";
+import { AlertTriangle, Crosshair, ExternalLink, Info, Loader2, Search, Trash2, UserPlus } from "lucide-react";
 import type { AppState, LobbyRow } from "../../shared/types";
 import { DISCLAIMER, mapName, SideEmblem } from "../brand";
 import { bridge } from "../bridge";
@@ -7,12 +7,18 @@ import { groupColor } from "../group-color";
 import { GroupStack } from "../group-stack";
 import { PlayerClass } from "../parts";
 import { PlayerRanks } from "../ranks";
+import { PlayerDetailsModal } from "./PlayerDetailsModal";
 
 const modeName = (m: string | null) =>
   m ? m.charAt(0).toUpperCase() + m.slice(1).replace(/_/g, " ") : null;
 
 export function MatchView({ s }: { s: AppState }) {
+  const [selectedSlot, setSelectedSlot] = useState<number | null>(null);
   const rows = s.lobby.rows;
+  const selectedPlayer = useMemo(
+    () => (selectedSlot !== null ? rows.find((r) => r.slot === selectedSlot) ?? null : null),
+    [rows, selectedSlot],
+  );
   const checkedOnly = !s.match && rows.length > 0;
   const title = checkedOnly
     ? "Checked players"
@@ -89,7 +95,7 @@ export function MatchView({ s }: { s: AppState }) {
 
         {rows.length > 0 ? (
           <div style={{ marginTop: 14 }}>
-            <LobbyTable rows={rows} />
+            <LobbyTable rows={rows} onInspect={setSelectedSlot} />
             {s.game.source === "steam" && !checkedOnly && (
               <p className="xs muted" style={{ margin: "12px 0 0", lineHeight: 1.45 }}>
                 Players come from Steam's recently played list, so teams aren't known. Only the first 10 players of a
@@ -128,6 +134,8 @@ export function MatchView({ s }: { s: AppState }) {
       <p className="xs dim" style={{ margin: 0, lineHeight: 1.5 }}>
         {DISCLAIMER}
       </p>
+
+      {selectedPlayer && <PlayerDetailsModal player={selectedPlayer} onClose={() => setSelectedSlot(null)} />}
     </>
   );
 }
@@ -168,7 +176,7 @@ function AddPlayerForm() {
   );
 }
 
-function LobbyTable({ rows }: { rows: LobbyRow[] }) {
+function LobbyTable({ rows, onInspect }: { rows: LobbyRow[]; onInspect: (slot: number) => void }) {
   const { groupSizes, teams } = useMemo(() => {
     const sizes = new Map<string, number>();
     const ct: LobbyRow[] = [];
@@ -204,7 +212,12 @@ function LobbyTable({ rows }: { rows: LobbyRow[] }) {
             <span className="tabular-nums">{list.length}</span>
           </div>
           {list.map((r) => (
-            <LobbyLine key={r.slot} r={r} groupSize={r.groupId ? (groupSizes.get(r.groupId) ?? 0) : 0} />
+            <LobbyLine
+              key={r.slot}
+              r={r}
+              groupSize={r.groupId ? (groupSizes.get(r.groupId) ?? 0) : 0}
+              onInspect={onInspect}
+            />
           ))}
         </div>
       ))}
@@ -212,7 +225,15 @@ function LobbyTable({ rows }: { rows: LobbyRow[] }) {
   );
 }
 
-const LobbyLine = memo(function LobbyLine({ r, groupSize }: { r: LobbyRow; groupSize: number }) {
+const LobbyLine = memo(function LobbyLine({
+  r,
+  groupSize,
+  onInspect,
+}: {
+  r: LobbyRow;
+  groupSize: number;
+  onInspect: (slot: number) => void;
+}) {
   const groupStyle = r.groupId ? { borderLeftColor: groupColor(r.groupId) } : undefined;
   return (
     <div className={`player${r.isLocal ? " is-local" : ""}`} style={groupStyle}>
@@ -221,13 +242,12 @@ const LobbyLine = memo(function LobbyLine({ r, groupSize }: { r: LobbyRow; group
       <button
         type="button"
         className="player-name"
-        disabled={!r.steamId}
-        title={r.steamId ? "Open Leetify profile" : undefined}
-        onClick={() => r.steamId && bridge.openPlayer(r.steamId)}
+        title="View player details & data sources"
+        onClick={() => onInspect(r.slot)}
       >
         {r.name}
       </button>
-      <PlayerRanks m={r.detail?.metrics} />
+      <PlayerRanks m={r.detail?.metrics} faceit={r.faceit} />
       {(r.isLocal || r.via) && (
         <span className="player-tags">
           {r.isLocal && <span className="you">you</span>}
@@ -267,6 +287,15 @@ const LobbyLine = memo(function LobbyLine({ r, groupSize }: { r: LobbyRow; group
           )}
         </span>
       )}
+      <button
+        type="button"
+        className="icon-btn"
+        onClick={() => onInspect(r.slot)}
+        title="View detailed stats & data sources"
+        aria-label="View detailed stats & data sources"
+      >
+        <Info size={14} />
+      </button>
       {r.steamId && r.status !== "skipped" && (
         <>
           <button

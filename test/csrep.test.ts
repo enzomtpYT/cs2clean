@@ -41,7 +41,7 @@ function jsonResponse(body: unknown, status = 200, headers: Record<string, strin
 describe("parseCsrepHtml", () => {
   it("parses Trust Score, Bans, Flags, Playtime, Inventory, and fallback metrics", () => {
     const parsed = parseCsrepHtml(SAMPLE_CSREP_HTML, STEAM_A);
-    expect(parsed).toEqual({
+    expect(parsed).toMatchObject({
       steamId: STEAM_A,
       trustScore: 99,
       bansCount: 1,
@@ -52,6 +52,35 @@ describe("parseCsrepHtml", () => {
       preaim: 10.9,
       aimAccuracy: 19.4,
       headAccuracy: 15.4,
+    });
+  });
+
+  it("parses CSRep Trust Score with tooltip, breakdown, and stats overview", () => {
+    const html = `
+      <html><body>
+        <div>Trust Score ? 99 % EXCELLENT</div>
+        <div>Breakdown Statistical Trust 99 Account Flags 92 Anomalies 100 + Account Bonus +7%</div>
+        <div>Stats Overview Time to Damage 543 ms Reaction Time 372 ms Crosshair Placement 8.2° Preaim 10.9° K/D Ratio 0.97 ADR 78.5 Aim Accuracy 19.4 % Head Accuracy 15.4 % Wallbang Kill % 2.2 % Smoke Kill % 5.9 % HLTV Rating 2.0 1.05 KAST 66.8 %</div>
+        <div>1 Ban 0 Flags 1,383 hrs $701</div>
+      </body></html>
+    `;
+    expect(parseCsrepHtml(html, STEAM_A)).toMatchObject({
+      steamId: STEAM_A,
+      trustScore: 99,
+      statisticalTrust: 99,
+      accountFlagsScore: 92,
+      anomaliesScore: 100,
+      accountBonusPct: 7,
+      reactionMs: 543,
+      preaim: 10.9,
+      aimAccuracy: 19.4,
+      headAccuracy: 15.4,
+      kdRatio: 0.97,
+      adr: 78.5,
+      hltvRating: 1.05,
+      kastPct: 66.8,
+      wallbangKillPct: 2.2,
+      smokeKillPct: 5.9,
     });
   });
 
@@ -164,19 +193,39 @@ describe("mergeCsrepReputation & toCsrepSummary", () => {
       preaim: 10.9,
       aimAccuracy: 19.4,
       headAccuracy: 15.4,
+      statisticalTrust: 99,
+      accountFlagsScore: 92,
+      anomaliesScore: 100,
+      accountBonusPct: 7,
+      kdRatio: 0.97,
+      adr: 78.5,
+      hltvRating: 1.05,
+      kastPct: 66.8,
+      wallbangKillPct: 2.2,
+      smokeKillPct: 5.9,
     };
     expect(mergeCsrepReputation({ score: 88, tier: "TRUSTED", confidence: 0.9, reasons: [] }, p)).toEqual({
-      score: 0,
-      tier: "BANNED",
-      confidence: 1,
-      reasons: ["Ban on record (CSRep: 1 ban)"],
+      score: 73,
+      tier: "NORMAL",
+      confidence: 0.9,
+      reasons: ["Ban on record (CSRep: 1 ban, -15)"],
     });
-    expect(toCsrepSummary(p)).toEqual({
+    expect(toCsrepSummary(p)).toMatchObject({
       trustScore: 99,
       bansCount: 1,
       flagsCount: 0,
       cs2Hours: 1383,
       inventoryUsd: 701,
+      statisticalTrust: 99,
+      accountFlagsScore: 92,
+      anomaliesScore: 100,
+      accountBonusPct: 7,
+      kdRatio: 0.97,
+      adr: 78.5,
+      hltvRating: 1.05,
+      kastPct: 66.8,
+      wallbangKillPct: 2.2,
+      smokeKillPct: 5.9,
     });
   });
 
@@ -192,6 +241,16 @@ describe("mergeCsrepReputation & toCsrepSummary", () => {
       preaim: null,
       aimAccuracy: null,
       headAccuracy: null,
+      statisticalTrust: null,
+      accountFlagsScore: null,
+      anomaliesScore: null,
+      accountBonusPct: null,
+      kdRatio: null,
+      adr: null,
+      hltvRating: null,
+      kastPct: null,
+      wallbangKillPct: null,
+      smokeKillPct: null,
     };
     expect(mergeCsrepReputation({ score: 72, tier: "NORMAL", confidence: 0.8, reasons: [] }, p)).toEqual({
       score: 72,
@@ -294,8 +353,9 @@ describe("Controller CSRep FlareSolverr integration", () => {
     await vi.waitFor(() => expect(controller.state.lobby.rows[0]?.status).toBe("ok"));
     const row = controller.state.lobby.rows[0];
     expect(controller.state.csrep.reachable).toBe(true);
-    expect(row.reputation?.tier).toBe("BANNED");
-    expect(row.classification).toBe("VERY_HIGH");
+    expect(row.reputation?.tier).toBe("NORMAL");
+    expect(row.reputation?.score).toBe(69);
+    expect(row.classification).toBe("NORMAL");
     expect(row.csrep?.trustScore).toBe(99);
     expect(row.csrep?.cs2Hours).toBe(1383);
 

@@ -522,6 +522,7 @@ if (!app.requestSingleInstanceLock()) {
       envKey: process.env.LEETIFY_API_KEY?.trim() || null,
       steamApiKey: process.env.STEAM_API_KEY?.trim() || null,
       flaresolverrUrl: process.env.FLARESOLVERR_URL?.trim() || null,
+      faceitKey: process.env.FACEIT_API_KEY?.trim() || null,
       csrepFetchImpl: net.fetch.bind(net) as typeof fetch,
       overlay,
       applyHotkeys: overlay.mode === "window" ? applyHotkeys : undefined,
@@ -599,6 +600,12 @@ if (!app.requestSingleInstanceLock()) {
     ipcMain.handle("csrep:open-player", (_e, steamId: unknown) => {
       const url = controller.csrepPlayerUrl(String(steamId ?? ""));
       if (url) openSafeExternal(url);
+    });
+    ipcMain.handle("faceit:set-key", (_e, key: unknown) =>
+      (typeof key === "string" ? controller.setFaceitApiKey(key) : false));
+    ipcMain.handle("faceit:clear-key", () => controller.clearFaceitApiKey());
+    ipcMain.handle("faceit:open-developer", () => {
+      openSafeExternal("https://developers.faceit.com/");
     });
     ipcMain.handle("update:check", () => checkUpdate(controller));
     ipcMain.handle("update:open-releases", () => {

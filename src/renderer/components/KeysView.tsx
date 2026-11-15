@@ -61,6 +61,26 @@ export function KeysView({ s }: { s: AppState }) {
         onSave={(url) => bridge.setFlaresolverrUrl(url)}
         onClear={() => bridge.clearFlaresolverrUrl()}
       />
+
+      <ApiKeySection
+        title="FACEIT Data API Key"
+        description="Optional. Looks up CS2 FACEIT level and Elo directly from FACEIT when Leetify has no FACEIT data for a player."
+        linkLabel="developers.faceit.com"
+        onOpenLink={() => bridge.openFaceitDeveloper()}
+        hasKey={s.faceit.hasKey}
+        statusLabel={
+          !s.faceit.hasKey
+            ? "Optional · Not set"
+            : s.faceit.reachable === false
+              ? "Saved · Unreachable"
+              : "Saved · Active"
+        }
+        statusTone={!s.faceit.hasKey ? "neutral" : s.faceit.reachable === false ? "bad" : "ok"}
+        placeholder="Paste FACEIT server-side API key"
+        savingLabel="Saving…"
+        onSave={(k) => bridge.setFaceitApiKey(k)}
+        onClear={() => bridge.clearFaceitApiKey()}
+      />
     </>
   );
 }

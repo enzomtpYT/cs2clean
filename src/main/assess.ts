@@ -201,6 +201,14 @@ export function assessProfile(p: LeetifyProfile): Assessment {
   if (cls >= 1 && atLeast(1) < 2) cls = 0;
   const classification = (["NORMAL", "ELEVATED", "HIGH", "VERY_HIGH"] as const)[cls];
 
+  const bans = (p.bans ?? [])
+    .filter((b): b is NonNullable<typeof b> => !!b)
+    .map((b) => ({
+      platform: b.platform ?? null,
+      nickname: b.platform_nickname ?? null,
+      bannedSince: b.banned_since ?? null,
+    }));
+
   // Every player with ratings gets a card (F6 shows any player, F7 the flagged ones).
   const detail: PlayerDetail = {
     score: Math.round(Math.min(100, Math.max(0, performance))),
@@ -209,6 +217,8 @@ export function assessProfile(p: LeetifyProfile): Assessment {
     metrics,
     source: p.source === "csst.at" ? "csst.at" : "leetify",
     matches,
+    firstMatchDate: p.first_match_date ?? null,
+    ...(bans.length > 0 ? { bans } : {}),
   };
   return {
     classification, totalMatches: total, confidence, name, note: null, detail,

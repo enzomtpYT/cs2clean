@@ -111,6 +111,17 @@ export interface PlayerDetail {
   source: "leetify" | "csst.at";
   /** From the per-match data; null when the API sent none (a private profile, or no matches yet). */
   matches: MatchSummary | null;
+  /** First match timestamp reported by Leetify (ISO string), if available. */
+  firstMatchDate?: string | null;
+  /** Bans reported by Leetify (e.g. FACEIT, matchmaking), if any. */
+  bans?: { platform: string | null; nickname: string | null; bannedSince: string | null }[];
+}
+
+export interface FaceitRankInfo {
+  /** FACEIT CS2 skill level, 1 to 10. */
+  level: number | null;
+  /** FACEIT CS2 Elo. */
+  elo: number | null;
 }
 
 export interface CsrepSummary {
@@ -119,6 +130,20 @@ export interface CsrepSummary {
   flagsCount: number;
   cs2Hours: number | null;
   inventoryUsd: number | null;
+  statisticalTrust?: number | null;
+  accountFlagsScore?: number | null;
+  anomaliesScore?: number | null;
+  accountBonusPct?: number | null;
+  reactionMs?: number | null;
+  preaim?: number | null;
+  aimAccuracy?: number | null;
+  headAccuracy?: number | null;
+  kdRatio?: number | null;
+  adr?: number | null;
+  hltvRating?: number | null;
+  kastPct?: number | null;
+  wallbangKillPct?: number | null;
+  smokeKillPct?: number | null;
 }
 
 export interface LobbyRow extends RosterPlayer {
@@ -131,6 +156,8 @@ export interface LobbyRow extends RosterPlayer {
   reputation: PlayerReputation | null;
   /** Optional CSRep.GG enrichment (bans, autoflag, hours, Steam account age). */
   csrep?: CsrepSummary | null;
+  /** Optional direct FACEIT fallback rank when Leetify lacks FACEIT data (including NO_DATA players). */
+  faceit?: FaceitRankInfo | null;
   /** Why there is no class (private profile, not on Leetify, rate limit...), for a tooltip. */
   note: string | null;
   /** UUID for the Steam friendship group this player belongs to in the current lobby; null when solo. */
@@ -166,6 +193,12 @@ export interface AppState {
     /** The configured FlareSolverr URL (e.g. http://localhost:8191), or null. */
     proxyUrl: string | null;
     /** null until the first lookup; false when CSRep or FlareSolverr couldn't be reached. */
+    reachable: boolean | null;
+  };
+  faceit: {
+    /** A FACEIT Data API v4 key is saved (or set in FACEIT_API_KEY). */
+    hasKey: boolean;
+    /** null until the first lookup; false when FACEIT rejected the key or couldn't be reached. */
     reachable: boolean | null;
   };
   /** Shown once, e.g. "Leetify rejected the API key". */
@@ -282,6 +315,12 @@ export interface Bridge {
   clearFlaresolverrUrl(): Promise<void>;
   /** Opens the player's CSRep.GG profile in the browser. */
   openCsrepPlayer(steamId: string): Promise<void>;
+  /** Saves a FACEIT Data API v4 key; returns false if empty. */
+  setFaceitApiKey(key: string): Promise<boolean>;
+  /** Removes the saved FACEIT Data API v4 key. */
+  clearFaceitApiKey(): Promise<void>;
+  /** Opens developers.faceit.com in the browser. */
+  openFaceitDeveloper(): Promise<void>;
   /** Checks for a newer release now (the once-a-day limit is for the automatic check at start-up only). */
   updateCheck(): Promise<UpdateResult>;
   /** Opens the GitHub releases page. */
