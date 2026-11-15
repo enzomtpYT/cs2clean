@@ -18,7 +18,8 @@ This page is for anyone curious about what the app reads, what it sends, and whe
 | **Steam's coplay list** | Who is in your match (Steam > View > Players). CS2 reports the roster to Steam when the match loads. |
 | **CS2 Game State Integration (GSI)** | When warm-up starts, when the match goes live, the map name, and your own Steam ID. GSI is a feature Valve built into CS2. The app writes a config file into CS2's `cfg` folder and listens on `127.0.0.1:37215`. |
 | **Leetify Public API** | Player ratings, stats, and match history. The class and the 0–100 reputation score are computed from this data. |
-| **csst.at** *(fallback)* | Stats for players Leetify has no profile for. The app reads csst.at through a headless Chrome driven by a helper program (Ulixee Hero), with a short pause between players. Chrome is downloaded the first time it is needed. |
+| **csst.at** *(fallback)* | Stats for players Leetify has no profile for. The app fetches csst.at directly in-process using Electron's `net.fetch` (Chromium's TLS/HTTP2 stack), with a short jittered pause between players. |
+| **CSRep.GG API** *(optional)* | Batch lookup for bans, autoflags, CS2 hours, and Steam account age when a CSRep API key is saved. |
 | **Steam's friends list** *(optional)* | Steam's players list leaves out your friends. With Steam's debug port on, the app reads the status line Steam's friends list shows for each friend ("Competitive - Office [ 5 : 0 ]", read-only, over a local port) and adds friends whose line equals yours. |
 | **CS2's `console.log`** *(optional)* | With CS2 launched with `-condebug`, the player list the `status` command prints in the CS2 console (read-only: the app only reads the file). Names that match your friends are added. |
 | **Steam profile pages** *(fallback)* | Only when neither of the above is in use: a friend's public Steam profile popup shows the map they are on, up to 10 minutes late. Matches are added as guesses, marked "maybe". |
@@ -33,10 +34,11 @@ This page is for anyone curious about what the app reads, what it sends, and whe
 
 ## Privacy
 
-- **Your keys:** your Leetify and Steam Web API keys are encrypted with your OS keychain (Windows DPAPI, Linux desktop keyring), or stored as plain text if none is available.
+- **Your keys:** your Leetify, Steam Web API, and CSRep.GG keys are encrypted with your OS keychain (Windows DPAPI, Linux desktop keyring), or stored as plain text (with `0600` file permissions) if none is available.
 - **What the app contacts:**
   - Leetify.
-  - `csst.at` for players Leetify doesn't know. The first time, it also downloads Chrome from `github.com/ulixee/chrome-versions`.
+  - `csst.at` for players Leetify doesn't know.
+  - `csrep.gg/api`, only if you saved a CSRep.GG API key.
   - `api.steampowered.com`, only if you saved a Steam key. It sends the key and the SteamIDs of the lobby players, plus yours when you run `status`, and the SteamID of a player you add by hand.
   - `steamcommunity.com` for the profile-page fallback, custom profile links and, without a Steam key, the name of a player you add by hand (their public mini-profile page).
   - `api.github.com` for the update check.
@@ -50,6 +52,6 @@ This page is for anyone curious about what the app reads, what it sends, and whe
 | Windows (portable `.zip`) | the `data` folder next to `CS2Clean.exe` |
 | Linux | `~/.config/CS2Clean` |
 
-The same folder holds `siren-ignore.txt`, the list of players the siren leaves out (one SteamID per line; **Settings > Ignore list** opens it).
+The same folder holds `siren-ignore.txt`, the list of players the siren leaves out (one SteamID per line; **Settings > Ignore list** opens it), and `player-cache.json`, a 6-hour cache of settled player lookups.
 
-The portable zip has a `portable.txt` file next to `CS2Clean.exe`. While it is there, the app keeps its settings, API keys, logs and downloads in the `data` folder beside it, so deleting the whole folder removes the app. The one thing outside it is `gamestate_integration_cs2clean.cfg` in CS2's `cfg` folder, which is harmless to leave.
+The portable zip has a `portable.txt` file next to `CS2Clean.exe`. While it is there, the app keeps its settings, API keys, player cache, and recordings in the `data` folder beside it, so deleting the whole folder removes the app. The one thing outside it is `gamestate_integration_cs2clean.cfg` in CS2's `cfg` folder, which is harmless to leave.

@@ -35,7 +35,7 @@ CS2Clean doesn't touch the game itself. In plain terms:
 
 - **No injection.** No code is injected into CS2, and nothing reads or changes its memory. The overlay is an ordinary transparent window kept on top of CS2.
 - **How it knows what's happening.** It uses Steam's players list and CS2's own *Game State Integration*, a feature Valve built into CS2 for apps like this. To use it, CS2Clean adds a small config file to CS2's `cfg` folder, and CS2 then sends basic match information (warm-up, live, the map) to the app on your own PC.
-- **What leaves your PC.** Lookups of the SteamIDs of the players in your lobby, sent to Leetify, to csst.at for players Leetify doesn't have, and, only if you saved a Steam Web API key, to Steam's Web API to see which of them are friends. Your API keys stay on your PC, encrypted with your system's keychain when one is available. Details: [How it works](docs/HOW-IT-WORKS.md#privacy).
+- **What leaves your PC.** Lookups of the SteamIDs of the players in your lobby, sent to Leetify, to csst.at for players Leetify doesn't have, to CSRep.GG if you saved a CSRep API key, and, only if you saved a Steam Web API key, to Steam's Web API to see which of them are friends. Your API keys stay on your PC, encrypted with your system's keychain when one is available. Details: [How it works](docs/HOW-IT-WORKS.md#privacy).
 
 ## Installation
 
@@ -46,7 +46,7 @@ Download the latest release from the [GitHub releases page](https://github.com/p
 Run the installer (it installs just for you, needs no administrator rights, and adds Start menu and desktop shortcuts) or the portable `.zip` (`CS2Clean-<version>-portable.zip`).
 
 - **Installed app:** settings are stored in `%APPDATA%\CS2Clean`.
-- **Portable `.zip`:** extract it into a folder of its own (Explorer's **Extract All**, or the **Extract to** entry in 7-Zip's menu) and run `CS2Clean.exe` from there. It keeps its settings and downloads in a `data` folder beside `CS2Clean.exe` (the csst.at fallback's Chrome download, about 370 MB, goes there too), so deleting the folder removes the app. It also adds one small file to CS2's `cfg` folder, which is harmless to leave. If you move the folder, switch **Start with Windows** off and on again.
+- **Portable `.zip`:** extract it into a folder of its own (Explorer's **Extract All**, or the **Extract to** entry in 7-Zip's menu) and run `CS2Clean.exe` from there. It keeps its settings, player cache, and recordings in a `data` folder beside `CS2Clean.exe`, so deleting the folder removes the app. It also adds one small file to CS2's `cfg` folder, which is harmless to leave. If you move the folder, switch **Start with Windows** off and on again.
 
 **SmartScreen:** The installer and the portable `CS2Clean.exe` are not yet code-signed. Windows will show "Windows protected your PC" — click **More info**, then **Run anyway**.
 
@@ -65,7 +65,7 @@ Run the installer (it installs just for you, needs no administrator rights, and 
    ./cs2clean
    ```
 
-You need native Steam running and signed in, and an X11 session (Wayland is untested). Settings are kept in `~/.config/CS2Clean`.
+You need native Steam running and signed in, on an X11 or Wayland session (Wayland uses a native `wlr-layer-shell` overlay helper). Settings are kept in `~/.config/CS2Clean`.
 
 ## First run
 
@@ -167,8 +167,7 @@ Custom profile links (`steamcommunity.com/id/name`) work too.
 | "Couldn't find CS2's folder" | The app can still read Steam's players list, but it won't know when warm-up starts or the match goes live. CS2Clean finds CS2 through Steam's library list, so any Steam library drive works, but it only looks for Steam in the usual places: the one in the Windows registry, or on Linux a native Steam in `~/.steam/debian-installation` or `~/.local/share/Steam` (Flatpak and Snap Steam aren't supported). |
 | Overlay not visible in CS2 | Make sure CS2 is in **Fullscreen Windowed** mode, not plain Fullscreen |
 | Leetify rate limits | Add a free Leetify API key (see [API keys](#api-keys)) |
-| "Setting up the csst.at fallback: downloading Chrome" | A one-time download (about 370 MB on disk) into the app's data folder, the first time a player isn't on Leetify. Lookups carry on meanwhile and the fallback works from the next one after it. |
-| "csst.at fallback unavailable" | The window gives the reason. Nothing else stops working: only players Leetify has no profile for can't be looked up on csst.at. Developers: see [the csst.at fallback](docs/DEVELOPMENT.md#the-csstat-fallback) |
+| "csst.at fallback unavailable" | The window gives the reason (for example, Cloudflare challenge or timeout). Nothing else stops working: only players Leetify has no profile for can't be looked up on csst.at |
 | `chrome-sandbox` error on Linux (common on Ubuntu 24.04 and derivatives) | See [Development](docs/DEVELOPMENT.md#linux-chrome-sandbox-error). For the tar.gz, run the same two commands on the `chrome-sandbox` file in the extracted folder |
 
 ## More documentation

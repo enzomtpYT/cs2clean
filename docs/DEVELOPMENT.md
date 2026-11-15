@@ -14,11 +14,10 @@ These steps were written for Linux. They should largely apply for Windows as wel
 git clone https://github.com/papelblume/CS2Clean.git
 cd CS2Clean
 npm ci
-npm run hero:install
 npm start
 ```
 
-`npm run hero:install` sets up the csst.at fallback (see below). Skip it and the app still works; the window then says "csst.at fallback unavailable" and why.
+On Linux, `npm run build` also compiles the optional Wayland `wlr-layer-shell` overlay helper (`tools/wayland/wayland-overlay.c`) if `wayland-scanner` and `wayland-client` development headers are installed.
 
 ## Run modes
 
@@ -33,12 +32,9 @@ npm run start:overwolf -- --record         # ...and saves what Overwolf reports 
 
 ## The csst.at fallback
 
-The fallback uses a helper (the Hero sidecar, explained in [DESIGN.md](DESIGN.md)). `npm run hero:install` needs Node 22 itself: the Node that runs it if that is 22, otherwise the newest nvm `v22.x`, or the one `CS2CLEAN_NODE22` points at. It installs Hero with that Node and copies the Node next to it.
+The fallback fetches player stats directly from `csst.at` in-process (`src/main/leetify-hero.ts` + `src/main/csst-parse.ts`) using Electron's `net.fetch` (Chromium's TLS/HTTP2 stack). No external browser download or sidecar is required.
 
-If the window says "csst.at fallback unavailable":
-
-- The full error is in `hero.log` in the app's data folder (`%APPDATA%\CS2Clean` on Windows, `data` beside `CS2Clean.exe` in the portable zip, `~/.config/CS2Clean` on Linux).
-- From a source checkout the usual fix is `npm run hero:install`.
+If the window says "csst.at fallback unavailable", `csst.at` was unreachable, timed out, or returned a Cloudflare challenge (HTTP 403).
 
 ## Linux: chrome-sandbox error
 
@@ -62,10 +58,8 @@ sudo chmod 4755 cs2clean-*/chrome-sandbox
 |----------|--------------|
 | `LEETIFY_API_KEY` | Your Leetify API key. A key saved in the app takes priority |
 | `STEAM_API_KEY` | Your Steam Web API key. A key saved in the app takes priority |
-| `CS2CLEAN_NODE22` | Points `npm run hero:install` at a Node 22 |
-| `CS2CLEAN_HERO_DIR` | Use this folder as the csst.at helper (it must contain `cli.js`). A wrong path is reported, not ignored |
-| `CS2CLEAN_DATA_DIR` | Where the helper keeps `hero.log`, its Chrome download and its `cat` shim when the app doesn't say (the app itself always uses its data folder) |
-| `CS2CLEAN_CSST_ORIGIN` | The address the helper reads csst.at from (default `https://csst.at`), for testing |
+| `CSREP_API_KEY` | Your CSRep.GG API key (`X-API-Key`). A key saved in the app takes priority |
+| `CS2CLEAN_CSST_ORIGIN` | The address the fallback reads csst.at from (default `https://csst.at`), for testing |
 
 ## UI development
 
@@ -92,8 +86,7 @@ npm run console-status   # watch CS2's console.log (-condebug): run `status` in 
 
 ```bash
 npm test
+npm run typecheck
 npm run build
-npm run hero:check                                   # the sidecar's selftest, from a source checkout
-npm run hero:check -- release/linux-unpacked/resources/hero   # ...or on a packaged build
 npm run check:package                                # verify a packaged app's asar contains expected files
 ```
