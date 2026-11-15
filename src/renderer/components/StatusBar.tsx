@@ -22,15 +22,15 @@ export function StatusBar({ s }: { s: AppState }) {
         ? "csst.at: ready"
         : "csst.at: unavailable";
 
-  const csrepTone = !s.csrep.hasKey
+  const csrepTone = !s.csrep.hasProxy
     ? ""
     : s.csrep.reachable === false
       ? "bad"
       : s.csrep.reachable === true
         ? "ok"
         : "";
-  const csrepLabel = !s.csrep.hasKey
-    ? "CSRep: no key"
+  const csrepLabel = !s.csrep.hasProxy
+    ? "CSRep: no proxy"
     : s.csrep.reachable === false
       ? "CSRep: error"
       : s.csrep.reachable === true

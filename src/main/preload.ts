@@ -38,10 +38,9 @@ const bridge: Bridge = {
   openSteamDeveloper: () => ipcRenderer.invoke("steam:open-developer"),
   setSteamApiKey: (key) => ipcRenderer.invoke("steam:set-key", key),
   clearSteamApiKey: () => ipcRenderer.invoke("steam:clear-key"),
-  setCsrepKey: (key) => ipcRenderer.invoke("csrep:set-key", key),
-  clearCsrepKey: () => ipcRenderer.invoke("csrep:clear-key"),
+  setFlaresolverrUrl: (url) => ipcRenderer.invoke("csrep:set-proxy", url),
+  clearFlaresolverrUrl: () => ipcRenderer.invoke("csrep:clear-proxy"),
   openCsrepPlayer: (steamId) => ipcRenderer.invoke("csrep:open-player", steamId),
-  openCsrepDocs: () => ipcRenderer.invoke("csrep:open-docs"),
   updateCheck: () => ipcRenderer.invoke("update:check"),
   openReleases: () => ipcRenderer.invoke("update:open-releases"),
 };

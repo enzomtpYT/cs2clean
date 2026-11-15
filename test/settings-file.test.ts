@@ -30,8 +30,8 @@ describe("settings file: save and load", () => {
 
   it("round-trips the keys, siren, friends-list setting and hotkeys", () => {
     const store = settingsFileStore(file, keychain());
-    store.save({ leetifyKey: "L-key", steamApiKey: "S-key", csrepApiKey: "C-key", siren: false, autoOpenFriendsList: false, hotkeys: { cycle: "F8" } });
-    expect(store.load()).toEqual({ leetifyKey: "L-key", steamApiKey: "S-key", csrepApiKey: "C-key", siren: false, autoOpenFriendsList: false, hotkeys: { cycle: "F8" } });
+    store.save({ leetifyKey: "L-key", steamApiKey: "S-key", flaresolverrUrl: "http://localhost:8191/v1", siren: false, autoOpenFriendsList: false, hotkeys: { cycle: "F8" } });
+    expect(store.load()).toEqual({ leetifyKey: "L-key", steamApiKey: "S-key", flaresolverrUrl: "http://localhost:8191/v1", siren: false, autoOpenFriendsList: false, hotkeys: { cycle: "F8" } });
   });
 
   it("keeps the keys encrypted on disk when the keychain is available", () => {

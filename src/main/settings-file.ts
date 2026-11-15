@@ -18,7 +18,7 @@ export interface KeyCrypto {
 
 /** The entries `save` writes itself. Everything else in the file (lastUpdateCheck, say) belongs to someone else. */
 const OWN_KEYS = new Set([
-  "leetifyKey", "leetifyKeyEnc", "steamApiKey", "steamApiKeyEnc", "csrepApiKey", "csrepApiKeyEnc",
+  "leetifyKey", "leetifyKeyEnc", "steamApiKey", "steamApiKeyEnc", "flaresolverrUrl",
   "siren", "sirenVolume", "sirenThreshold", "overlayOpacity", "overlayScale", "autoHideOnLive",
   "autoOpenFriendsList", "hotkeys",
 ]);
@@ -54,11 +54,11 @@ export function settingsFileStore(file: string, keychain: KeyCrypto): SettingsSt
         if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
         const leetifyKey = decryptKey(raw.leetifyKeyEnc, raw.leetifyKey, keychain);
         const steamApiKey = decryptKey(raw.steamApiKeyEnc, raw.steamApiKey, keychain);
-        const csrepApiKey = decryptKey(raw.csrepApiKeyEnc, raw.csrepApiKey, keychain);
+        const flaresolverrUrl = typeof raw.flaresolverrUrl === "string" && raw.flaresolverrUrl ? raw.flaresolverrUrl : null;
         return {
           leetifyKey,
           steamApiKey,
-          csrepApiKey,
+          flaresolverrUrl,
           siren: typeof raw.siren === "boolean" ? raw.siren : undefined,
           sirenVolume: typeof raw.sirenVolume === "number" && Number.isFinite(raw.sirenVolume) ? raw.sirenVolume : undefined,
           sirenThreshold: raw.sirenThreshold === "high" || raw.sirenThreshold === "very_high" ? raw.sirenThreshold : undefined,
@@ -89,8 +89,7 @@ export function settingsFileStore(file: string, keychain: KeyCrypto): SettingsSt
       else if (s.leetifyKey) out.leetifyKey = s.leetifyKey;
       if (s.steamApiKey && keychain.isAvailable()) out.steamApiKeyEnc = keychain.encrypt(s.steamApiKey);
       else if (s.steamApiKey) out.steamApiKey = s.steamApiKey;
-      if (s.csrepApiKey && keychain.isAvailable()) out.csrepApiKeyEnc = keychain.encrypt(s.csrepApiKey);
-      else if (s.csrepApiKey) out.csrepApiKey = s.csrepApiKey;
+      if (s.flaresolverrUrl) out.flaresolverrUrl = s.flaresolverrUrl;
       // What this store doesn't own stays as it was.
       for (const [k, v] of Object.entries(readRaw(file))) if (!OWN_KEYS.has(k)) out[k] = v;
       writeFileSync(file, JSON.stringify(out, null, 2), { encoding: "utf8", mode: 0o600 });

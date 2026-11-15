@@ -250,9 +250,14 @@ const LobbyLine = memo(function LobbyLine({ r, groupSize }: { r: LobbyRow; group
       <PlayerClass r={r} />
       {r.csrep && (
         <span className="player-tags">
-          {r.csrep.autoflagged && (
-            <span className="group-badge" title="Autoflagged on CSRep.GG">
-              autoflag
+          {r.csrep.trustScore !== null && (
+            <span className="group-badge tabular-nums" title="CSRep.GG Trust Score">
+              {Math.round(r.csrep.trustScore)}% trust
+            </span>
+          )}
+          {r.csrep.flagsCount > 0 && (
+            <span className="group-badge tabular-nums" title="Account flags on CSRep.GG">
+              {r.csrep.flagsCount} flag{r.csrep.flagsCount === 1 ? "" : "s"}
             </span>
           )}
           {r.csrep.cs2Hours !== null && (

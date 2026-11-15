@@ -113,20 +113,12 @@ export interface PlayerDetail {
   matches: MatchSummary | null;
 }
 
-export interface CsrepBanSummary {
-  source: string;
-  type: string;
-  reason: string | null;
-  startsAt: string | null;
-}
-
 export interface CsrepSummary {
+  trustScore: number | null;
+  bansCount: number;
+  flagsCount: number;
   cs2Hours: number | null;
-  steamLevel: number | null;
-  steamCreatedAt: string | null;
-  autoflagged: boolean;
-  bans: CsrepBanSummary[];
-  faceitUrl: string | null;
+  inventoryUsd: number | null;
 }
 
 export interface LobbyRow extends RosterPlayer {
@@ -169,9 +161,11 @@ export interface AppState {
     hasKey: boolean;
   };
   csrep: {
-    /** A CSRep.GG API key is saved (or set in CSREP_API_KEY). */
-    hasKey: boolean;
-    /** null until the first lookup; false when CSRep couldn't be reached or rejected the key. */
+    /** A FlareSolverr proxy URL is saved (or set in FLARESOLVERR_URL). */
+    hasProxy: boolean;
+    /** The configured FlareSolverr URL (e.g. http://localhost:8191), or null. */
+    proxyUrl: string | null;
+    /** null until the first lookup; false when CSRep or FlareSolverr couldn't be reached. */
     reachable: boolean | null;
   };
   /** Shown once, e.g. "Leetify rejected the API key". */
@@ -282,14 +276,12 @@ export interface Bridge {
   setSteamApiKey(key: string): Promise<boolean>;
   /** Removes the saved Steam Web API key. */
   clearSteamApiKey(): Promise<void>;
-  /** Saves a CSRep.GG API key (X-API-Key); returns false if empty. */
-  setCsrepKey(key: string): Promise<boolean>;
-  /** Removes the saved CSRep.GG API key. */
-  clearCsrepKey(): Promise<void>;
+  /** Saves a FlareSolverr proxy URL for CSRep.GG scraping; returns false if invalid. */
+  setFlaresolverrUrl(url: string): Promise<boolean>;
+  /** Removes the saved FlareSolverr proxy URL. */
+  clearFlaresolverrUrl(): Promise<void>;
   /** Opens the player's CSRep.GG profile in the browser. */
   openCsrepPlayer(steamId: string): Promise<void>;
-  /** Opens the CSRep.GG API reference page in the browser. */
-  openCsrepDocs(): Promise<void>;
   /** Checks for a newer release now (the once-a-day limit is for the automatic check at start-up only). */
   updateCheck(): Promise<UpdateResult>;
   /** Opens the GitHub releases page. */

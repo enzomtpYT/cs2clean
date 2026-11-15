@@ -21,7 +21,6 @@ import type { Hotkeys } from "../shared/hotkeys";
 import { OVERWOLF_HOTKEYS } from "../shared/overwolf-hotkeys";
 import type { AppState } from "../shared/types";
 import { Controller, type SettingsStore } from "./controller";
-import { CSREP_DOCS_URL } from "./csrep";
 import { checkHeroRuntime, configureHero, onHeroStatus } from "./leetify-hero";
 import { keepClickThrough } from "./click-through";
 import { keepOverlayPositionedAndOnTop, linuxOverlayWindowOptions, overlayBounds, OVERLAY_SIZE } from "./overlay-window";
@@ -522,7 +521,8 @@ if (!app.requestSingleInstanceLock()) {
       },
       envKey: process.env.LEETIFY_API_KEY?.trim() || null,
       steamApiKey: process.env.STEAM_API_KEY?.trim() || null,
-      csrepApiKey: process.env.CSREP_API_KEY?.trim() || null,
+      flaresolverrUrl: process.env.FLARESOLVERR_URL?.trim() || null,
+      csrepFetchImpl: net.fetch.bind(net) as typeof fetch,
       overlay,
       applyHotkeys: overlay.mode === "window" ? applyHotkeys : undefined,
       // Store (MSIX) installs can't add a plain login item, so they don't offer it.
@@ -593,15 +593,12 @@ if (!app.requestSingleInstanceLock()) {
     ipcMain.handle("steam:open-developer", () => {
       openSafeExternal("https://steamcommunity.com/dev/apikey");
     });
-    ipcMain.handle("csrep:set-key", (_e, key: unknown) =>
-      (typeof key === "string" ? controller.setCsrepKey(key) : false));
-    ipcMain.handle("csrep:clear-key", () => controller.clearCsrepKey());
+    ipcMain.handle("csrep:set-proxy", (_e, url: unknown) =>
+      (typeof url === "string" ? controller.setFlaresolverrUrl(url) : false));
+    ipcMain.handle("csrep:clear-proxy", () => controller.clearFlaresolverrUrl());
     ipcMain.handle("csrep:open-player", (_e, steamId: unknown) => {
       const url = controller.csrepPlayerUrl(String(steamId ?? ""));
       if (url) openSafeExternal(url);
-    });
-    ipcMain.handle("csrep:open-docs", () => {
-      openSafeExternal(CSREP_DOCS_URL);
     });
     ipcMain.handle("update:check", () => checkUpdate(controller));
     ipcMain.handle("update:open-releases", () => {

@@ -124,7 +124,7 @@ function simulated(): Bridge {
         : { working: true, reason: null },
     },
     steam: { hasKey: false },
-    csrep: { hasKey: false, reachable: null },
+    csrep: { hasProxy: false, proxyUrl: null, reachable: null },
     notice: null,
     game: {
       source: "steam",
@@ -202,10 +202,14 @@ function simulated(): Bridge {
     openSteamDeveloper: async () => {},
     setSteamApiKey: async (key) => (key.trim() !== ""),
     clearSteamApiKey: async () => {},
-    setCsrepKey: async (key) => (set({ csrep: { hasKey: key.trim() !== "", reachable: null } }), key.trim() !== ""),
-    clearCsrepKey: async () => set({ csrep: { hasKey: false, reachable: null } }),
+    setFlaresolverrUrl: async (url) => {
+      const trimmed = url.trim();
+      if (!trimmed) return false;
+      set({ csrep: { hasProxy: true, proxyUrl: trimmed, reachable: null } });
+      return true;
+    },
+    clearFlaresolverrUrl: async () => set({ csrep: { hasProxy: false, proxyUrl: null, reachable: null } }),
     openCsrepPlayer: async () => {},
-    openCsrepDocs: async () => {},
     updateCheck: async () => ({ status: "current" }),
     openReleases: async () => {},
   };

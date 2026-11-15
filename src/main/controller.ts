@@ -10,7 +10,7 @@ import { MAX_MANUAL } from "../shared/lobby-size";
 import { parseSteamInput } from "../shared/steam-id";
 import type { AppState, LobbyRow, MatchState, SirenThreshold } from "../shared/types";
 import type { GameSource } from "./game/source";
-import { CsrepClient, CsrepError, toCsrepSummary, type CsrepPlayer } from "./csrep";
+import { CsrepError, CsrepScraper, normalizeFlaresolverrUrl, toCsrepSummary, type CsrepProfile } from "./csrep";
 import { LeetifyClient, LeetifyError, lookupLobby, type DataSource, type LookupOptions } from "./leetify";
 import { LobbyService, LookupBlocked, type LobbyAnswer, type LobbyOptions } from "./lobby";
 import { mergeCsrepReputation } from "./reputation";
@@ -24,8 +24,8 @@ export interface Settings {
   leetifyKey?: string | null;
   /** The user's Steam Web API key (https://steamcommunity.com/dev/apikey). */
   steamApiKey?: string | null;
-  /** The user's CSRep.GG API key (X-API-Key). */
-  csrepApiKey?: string | null;
+  /** FlareSolverr proxy URL for CSRep.GG web scraping (e.g. http://localhost:8191). */
+  flaresolverrUrl?: string | null;
   /** Siren when a HIGH player is found (default on). */
   siren?: boolean;
   /** Siren volume from 0 to 1 (default 0.22). */
@@ -57,8 +57,10 @@ export interface ControllerDeps {
   envKey?: string | null;
   /** Steam Web API key from STEAM_API_KEY environment variable. */
   steamApiKey?: string | null;
-  /** CSRep.GG API key from CSREP_API_KEY environment variable. */
-  csrepApiKey?: string | null;
+  /** FlareSolverr proxy URL from FLARESOLVERR_URL environment variable. */
+  flaresolverrUrl?: string | null;
+  /** Optional fetch implementation for CSRep scraping (main.ts passes Electron's net.fetch). */
+  csrepFetchImpl?: typeof fetch;
   overlay: Omit<AppState["overlay"], "sirenVolume" | "sirenThreshold" | "opacity" | "scale" | "autoHideOnLive">
     & Partial<Pick<AppState["overlay"], "sirenVolume" | "sirenThreshold" | "opacity" | "scale" | "autoHideOnLive">>;
   fetchImpl?: typeof fetch;
@@ -77,7 +79,7 @@ export interface ControllerDeps {
 
 export class Controller extends EventEmitter<{ state: [AppState] }> {
   readonly leetify: LeetifyClient;
-  readonly csrep: CsrepClient;
+  readonly csrep: CsrepScraper;
   private lobby: LobbyService;
   /** Takes this controller's listeners off the game source; null while they aren't on it (before start(), after stop()). */
   private detachSource: (() => void) | null = null;
@@ -97,15 +99,15 @@ export class Controller extends EventEmitter<{ state: [AppState] }> {
     this.settings = { ...deps.store.load() };
     const key = this.settings.leetifyKey || deps.envKey || null;
     this.leetify = new LeetifyClient(key, deps.fetchImpl);
-    const csrepKey = this.settings.csrepApiKey || deps.csrepApiKey || null;
-    this.csrep = new CsrepClient(csrepKey, deps.fetchImpl);
+    const proxyUrl = normalizeFlaresolverrUrl(this.settings.flaresolverrUrl || deps.flaresolverrUrl || "") ?? null;
+    this.csrep = new CsrepScraper(proxyUrl, deps.csrepFetchImpl ?? deps.fetchImpl);
     const steamKey = this.steamKey;
     this.lobby = this.createLobby();
     this.state = {
       version: deps.version,
       leetify: { hasKey: !!key, reachable: null, fallback: { working: null, reason: null } },
       steam: { hasKey: !!steamKey },
-      csrep: { hasKey: !!csrepKey, reachable: null },
+      csrep: { hasProxy: !!proxyUrl, proxyUrl, reachable: null },
       notice: null,
       game: { source: deps.source.kind, running: false, problem: null, hint: null, rosterUnavailable: false },
       match: null,
@@ -248,24 +250,30 @@ export class Controller extends EventEmitter<{ state: [AppState] }> {
     this.update({ steam: { hasKey: !!this.steamKey } });
   }
 
-  /** Saves a CSRep.GG API key (X-API-Key) and clears the lobby cache so players are enriched with it. */
-  setCsrepKey(raw: string): boolean {
-    const key = raw.trim();
-    if (!key) return false;
-    this.settings = { ...this.settings, csrepApiKey: key };
+  /** Saves a FlareSolverr proxy URL for CSRep.GG scraping and clears the lobby cache. */
+  setFlaresolverrUrl(raw: string): boolean {
+    const normalized = normalizeFlaresolverrUrl(raw);
+    if (!normalized) {
+      this.update({ notice: "Invalid FlareSolverr URL (expected http:// or https://)." });
+      return false;
+    }
+    this.settings = { ...this.settings, flaresolverrUrl: normalized };
     this.deps.store.save(this.settings);
-    this.csrep.apiKey = key;
-    this.update({ csrep: { hasKey: true, reachable: null }, notice: null });
+    this.csrep.flaresolverrUrl = normalized;
+    this.csrep.resetClearance();
+    this.update({ csrep: { hasProxy: true, proxyUrl: normalized, reachable: null }, notice: null });
     this.lobby.clear();
     return true;
   }
 
-  /** Removes the saved CSRep.GG API key; CSREP_API_KEY takes over if set. */
-  clearCsrepKey(): void {
-    this.settings = { ...this.settings, csrepApiKey: null };
+  /** Removes the saved FlareSolverr proxy URL; FLARESOLVERR_URL takes over if set. */
+  clearFlaresolverrUrl(): void {
+    this.settings = { ...this.settings, flaresolverrUrl: null };
     this.deps.store.save(this.settings);
-    this.csrep.apiKey = this.deps.csrepApiKey || null;
-    this.update({ csrep: { hasKey: !!this.csrep.apiKey, reachable: null } });
+    const fallbackUrl = normalizeFlaresolverrUrl(this.deps.flaresolverrUrl || "") ?? null;
+    this.csrep.flaresolverrUrl = fallbackUrl;
+    this.csrep.resetClearance();
+    this.update({ csrep: { hasProxy: !!fallbackUrl, proxyUrl: fallbackUrl, reachable: null } });
     this.lobby.clear();
   }
 
@@ -559,14 +567,14 @@ export class Controller extends EventEmitter<{ state: [AppState] }> {
 
   // ------------------------------------------------------------------ lobby
 
-  private async fetchCsrepSafe(steamIds: string[]): Promise<Map<string, CsrepPlayer>> {
-    if (!this.csrep.apiKey) return new Map();
+  private async fetchCsrepSafe(steamIds: string[]): Promise<Map<string, CsrepProfile>> {
+    if (!this.csrep.flaresolverrUrl) return new Map();
     try {
       const map = await this.csrep.fetchPlayers(steamIds);
       if (this.state.csrep.reachable !== true) this.update({ csrep: { ...this.state.csrep, reachable: true } });
       return map;
     } catch (e) {
-      const notice = e instanceof CsrepError && (e.kind === "invalid-key" || e.kind === "cloudflare-blocked")
+      const notice = e instanceof CsrepError && (e.kind === "proxy-unreachable" || e.kind === "cloudflare-blocked")
         ? message(e)
         : this.state.notice;
       this.update({ csrep: { ...this.state.csrep, reachable: false }, notice });
@@ -616,38 +624,35 @@ export class Controller extends EventEmitter<{ state: [AppState] }> {
   }
 }
 
-function enrichAnswerWithCsrep(answer: LobbyAnswer, csrep: CsrepPlayer | undefined): LobbyAnswer {
+function enrichAnswerWithCsrep(answer: LobbyAnswer, csrep: CsrepProfile | undefined): LobbyAnswer {
   if (!csrep) return answer;
   const reputation = mergeCsrepReputation(answer.reputation ?? null, csrep);
   const classification = reputation?.tier === "BANNED" ? "VERY_HIGH" : answer.classification;
-  const name = answer.name || csrep.name || null;
   let detail = answer.detail ?? null;
-  if (detail && csrep.ranks) {
-    const faceitRank = numRank(csrep.ranks.faceit?.current);
-    const premierRank = numRank(csrep.ranks.premier?.current);
-    if ((detail.metrics.faceit === null && faceitRank !== null) || (detail.metrics.premier === null && premierRank !== null)) {
+  if (detail) {
+    const needsFallback =
+      (detail.metrics.reactionMs === null && csrep.reactionMs !== null) ||
+      (detail.metrics.preaim === null && csrep.preaim !== null) ||
+      (detail.metrics.headAccuracy === null && csrep.headAccuracy !== null);
+    if (needsFallback) {
       detail = {
         ...detail,
         metrics: {
           ...detail.metrics,
-          faceit: detail.metrics.faceit ?? faceitRank,
-          premier: detail.metrics.premier ?? premierRank,
+          reactionMs: detail.metrics.reactionMs ?? csrep.reactionMs,
+          preaim: detail.metrics.preaim ?? csrep.preaim,
+          headAccuracy: detail.metrics.headAccuracy ?? csrep.headAccuracy,
         },
       };
     }
   }
   return {
     ...answer,
-    name,
     classification,
     reputation,
     detail,
     csrep: toCsrepSummary(csrep),
   };
-}
-
-function numRank(v: unknown): number | null {
-  return typeof v === "number" && Number.isFinite(v) ? v : null;
 }
 
 function message(e: unknown): string {

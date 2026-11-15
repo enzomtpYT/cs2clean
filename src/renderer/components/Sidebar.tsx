@@ -50,7 +50,7 @@ export function Sidebar({ s, activeTab, onSelectTab, themeMode, onCycleTheme }: 
   const hasHighPlayer = s.lobby.rows.some(
     (r) => !r.isLocal && (r.classification === "HIGH" || r.classification === "VERY_HIGH"),
   );
-  const keyCount = (s.leetify.hasKey ? 1 : 0) + (s.steam.hasKey ? 1 : 0) + (s.csrep.hasKey ? 1 : 0);
+  const keyCount = (s.leetify.hasKey ? 1 : 0) + (s.steam.hasKey ? 1 : 0) + (s.csrep.hasProxy ? 1 : 0);
 
   const navItems: Array<{
     id: NavTab;

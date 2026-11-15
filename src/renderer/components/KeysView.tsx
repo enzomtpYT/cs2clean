@@ -41,23 +41,25 @@ export function KeysView({ s }: { s: AppState }) {
       />
 
       <ApiKeySection
-        title="CSRep.GG API Key"
-        description="Optional enrichment for bans, autoflag status, CS2 hours, and fallback ranks."
-        linkLabel="csrep.gg/docs/api-reference"
-        onOpenLink={() => bridge.openCsrepDocs()}
-        hasKey={s.csrep.hasKey}
+        title="CSRep.GG (FlareSolverr Proxy)"
+        description="Optional web scraping for CSRep Trust Score, bans, flags, and CS2 hours via a local FlareSolverr instance."
+        linkLabel="csrep.gg"
+        onOpenLink={() => bridge.openCsrepPlayer("76561198149190660")}
+        hasKey={s.csrep.hasProxy}
         statusLabel={
-          !s.csrep.hasKey
+          !s.csrep.hasProxy
             ? "Optional · Not set"
             : s.csrep.reachable === false
               ? "Saved · Unreachable"
-              : "Saved · Active"
+              : s.csrep.proxyUrl
+                ? `Saved · ${s.csrep.proxyUrl}`
+                : "Saved · Active"
         }
-        statusTone={!s.csrep.hasKey ? "neutral" : s.csrep.reachable === false ? "bad" : "ok"}
-        placeholder="Paste CSRep.GG X-API-Key"
+        statusTone={!s.csrep.hasProxy ? "neutral" : s.csrep.reachable === false ? "bad" : "ok"}
+        placeholder="http://localhost:8191"
         savingLabel="Saving…"
-        onSave={(k) => bridge.setCsrepKey(k)}
-        onClear={() => bridge.clearCsrepKey()}
+        onSave={(url) => bridge.setFlaresolverrUrl(url)}
+        onClear={() => bridge.clearFlaresolverrUrl()}
       />
     </>
   );

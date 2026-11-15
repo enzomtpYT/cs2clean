@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Controller } from "../src/main/controller";
-import { CsrepClient, CsrepError, toCsrepSummary, type CsrepPlayer } from "../src/main/csrep";
+import { CsrepError, CsrepScraper, normalizeFlaresolverrUrl, toCsrepSummary } from "../src/main/csrep";
+import { parseCsrepHtml, type CsrepProfile } from "../src/main/csrep-parse";
 import type { GameSource } from "../src/main/game/source";
 import { mergeCsrepReputation } from "../src/main/reputation";
 import { settingsFileStore, type KeyCrypto } from "../src/main/settings-file";
@@ -13,6 +14,23 @@ import type { MatchState } from "../src/shared/types";
 const STEAM_A = "76561198149190660";
 const STEAM_B = "76561198000000001";
 
+const SAMPLE_CSREP_HTML = `
+<html><body>
+  <h1>[FR] enzomtp</h1>
+  <button><span>1 Ban</span></button>
+  <button><span>0 Flags</span></button>
+  <button><span>0 Bans</span></button>
+  <div>Trust Score <span>99%</span></div>
+  <h2>Stats Overview</h2>
+  <div>Time to Damage <span>543ms</span></div>
+  <div>Preaim <span>10.9°</span></div>
+  <div>Aim Accuracy <span>19.4%</span></div>
+  <div>Head Accuracy <span>15.4%</span></div>
+  <div><span class="section-label">Playtime</span><span class="font-display text-sm">1,383 h</span></div>
+  <div><span class="section-label">Inventory</span><a href="/inventory">$701</a></div>
+</body></html>
+`;
+
 function jsonResponse(body: unknown, status = 200, headers: Record<string, string> = {}): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -20,126 +38,191 @@ function jsonResponse(body: unknown, status = 200, headers: Record<string, strin
   });
 }
 
-describe("CsrepClient", () => {
-  it("returns empty map when apiKey is missing or no valid Steam64 IDs are given", async () => {
-    const fetchSpy = vi.fn();
-    const noKey = new CsrepClient(null, fetchSpy as unknown as typeof fetch);
-    expect((await noKey.fetchPlayers([STEAM_A])).size).toBe(0);
-    expect(fetchSpy).not.toHaveBeenCalled();
+describe("parseCsrepHtml", () => {
+  it("parses Trust Score, Bans, Flags, Playtime, Inventory, and fallback metrics", () => {
+    const parsed = parseCsrepHtml(SAMPLE_CSREP_HTML, STEAM_A);
+    expect(parsed).toEqual({
+      steamId: STEAM_A,
+      trustScore: 99,
+      bansCount: 1,
+      flagsCount: 0,
+      cs2Hours: 1383,
+      inventoryUsd: 701,
+      reactionMs: 543,
+      preaim: 10.9,
+      aimAccuracy: 19.4,
+      headAccuracy: 15.4,
+    });
+  });
 
-    const withKey = new CsrepClient("secret", fetchSpy as unknown as typeof fetch);
-    expect((await withKey.fetchPlayers(["not-a-steam-id"])).size).toBe(0);
+  it("returns null for Cloudflare challenge pages or missing player data", () => {
+    expect(parseCsrepHtml("<html><script>window._cf_chl_opt={}</script></html>", STEAM_A)).toBeNull();
+    expect(parseCsrepHtml("<html><body>Player not found</body></html>", STEAM_A)).toBeNull();
+  });
+});
+
+describe("normalizeFlaresolverrUrl", () => {
+  it("normalizes base URLs to /v1 and rejects non-http protocols", () => {
+    expect(normalizeFlaresolverrUrl("http://localhost:8191")).toBe("http://localhost:8191/v1");
+    expect(normalizeFlaresolverrUrl("http://localhost:8191/v1/")).toBe("http://localhost:8191/v1");
+    expect(normalizeFlaresolverrUrl("ftp://localhost:8191")).toBeNull();
+    expect(normalizeFlaresolverrUrl("not a url")).toBeNull();
+  });
+});
+
+describe("CsrepScraper", () => {
+  it("returns empty map when no FlareSolverr URL is configured", async () => {
+    const fetchSpy = vi.fn();
+    const scraper = new CsrepScraper(null, fetchSpy as unknown as typeof fetch);
+    expect((await scraper.fetchPlayers([STEAM_A], 0)).size).toBe(0);
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it("batch-fetches valid Steam64 IDs with X-API-Key header", async () => {
+  it("uses FlareSolverr on first request, caches cf_clearance + UA, and reuses net.fetch for next player", async () => {
     const fetchSpy = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
-      expect(String(input)).toBe(`https://csrep.gg/api/players?ids=${encodeURIComponent(`${STEAM_A},${STEAM_B}`)}`);
-      expect((init?.headers as Record<string, string>)["X-API-Key"]).toBe("my-key");
-      return jsonResponse({
-        status: "OK",
-        result: [{ id: STEAM_A, cs2_hours: 1200, autoflag: null, bans: [] }],
+      const url = String(input);
+      if (url === "http://localhost:8191/v1") {
+        const body = JSON.parse(String(init?.body)) as { cmd: string; url: string };
+        expect(body.cmd).toBe("request.get");
+        expect(body.url).toBe(`https://csrep.gg/player/${STEAM_A}`);
+        return jsonResponse({
+          status: "ok",
+          solution: {
+            status: 200,
+            response: SAMPLE_CSREP_HTML,
+            cookies: [{ name: "cf_clearance", value: "abc123" }],
+            userAgent: "MockUA/1.0",
+          },
+        });
+      }
+      if (url === `https://csrep.gg/player/${STEAM_B}`) {
+        const headers = init?.headers as Record<string, string>;
+        expect(headers.Cookie).toBe("cf_clearance=abc123");
+        expect(headers["User-Agent"]).toBe("MockUA/1.0");
+        return new Response(SAMPLE_CSREP_HTML.replace("1 Ban", "0 Bans").replace("99%", "85%"), { status: 200 });
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+
+    const scraper = new CsrepScraper("http://localhost:8191", fetchSpy as unknown as typeof fetch);
+    const map = await scraper.fetchPlayers([STEAM_A, STEAM_B], 0);
+    expect(map.get(STEAM_A)?.trustScore).toBe(99);
+    expect(map.get(STEAM_B)?.trustScore).toBe(85);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("re-solves via FlareSolverr if cached cf_clearance receives a 403 challenge", async () => {
+    let calls = 0;
+    const fetchSpy = vi.fn(async (input: string | URL | Request) => {
+      calls++;
+      const url = String(input);
+      if (url === "http://localhost:8191/v1") {
+        return jsonResponse({
+          status: "ok",
+          solution: {
+            status: 200,
+            response: SAMPLE_CSREP_HTML,
+            cookies: [{ name: "cf_clearance", value: `token-${calls}` }],
+            userAgent: "MockUA/1.0",
+          },
+        });
+      }
+      // Cached clearance gets 403 once
+      return new Response("<html>Just a moment</html>", {
+        status: 403,
+        headers: { "cf-mitigated": "challenge" },
       });
     });
 
-    const client = new CsrepClient("my-key", fetchSpy as unknown as typeof fetch);
-    const res = await client.fetchPlayers([STEAM_A, STEAM_A, "bad", STEAM_B]);
-    expect(res.size).toBe(1);
-    expect(res.get(STEAM_A)?.cs2_hours).toBe(1200);
+    const scraper = new CsrepScraper("http://localhost:8191", fetchSpy as unknown as typeof fetch);
+    await scraper.fetchPlayer(STEAM_A);
+    const second = await scraper.fetchPlayer(STEAM_B);
+    expect(second?.trustScore).toBe(99);
+    expect(calls).toBe(3); // FlareSolverr(A) -> direct 403(B) -> FlareSolverr(B)
   });
 
-  it("distinguishes Cloudflare 403 challenge from API key 401/403 errors", async () => {
-    const cfFetch = vi.fn(async () =>
-      new Response("<html><title>Just a moment...</title></html>", {
-        status: 403,
-        headers: { "content-type": "text/html", "cf-mitigated": "challenge" },
-      }),
-    );
-    const cfClient = new CsrepClient("k", cfFetch as unknown as typeof fetch);
-    await expect(cfClient.fetchPlayers([STEAM_A])).rejects.toMatchObject({
-      name: "CsrepError",
-      kind: "cloudflare-blocked",
+  it("throws proxy-unreachable when FlareSolverr cannot be reached", async () => {
+    const fetchSpy = vi.fn(async () => {
+      throw new Error("ECONNREFUSED");
     });
-
-    const authFetch = vi.fn(async () => jsonResponse({ error: "unauthorized" }, 401));
-    const authClient = new CsrepClient("bad", authFetch as unknown as typeof fetch);
-    await expect(authClient.fetchPlayers([STEAM_A])).rejects.toBeInstanceOf(CsrepError);
-    await expect(authClient.fetchPlayers([STEAM_A])).rejects.toMatchObject({ kind: "invalid-key" });
-  });
-
-  it("maps 429 and network errors", async () => {
-    const rateFetch = vi.fn(async () => jsonResponse({}, 429));
-    await expect(new CsrepClient("k", rateFetch as unknown as typeof fetch).fetchPlayers([STEAM_A])).rejects.toMatchObject({
-      kind: "rate-limit",
-    });
-
-    const netFetch = vi.fn(async () => {
-      throw new Error("ECONNRESET");
-    });
-    await expect(new CsrepClient("k", netFetch as unknown as typeof fetch).fetchPlayers([STEAM_A])).rejects.toMatchObject({
-      kind: "network",
-    });
+    const scraper = new CsrepScraper("http://localhost:8191", fetchSpy as unknown as typeof fetch);
+    await expect(scraper.fetchPlayers([STEAM_A], 0)).rejects.toBeInstanceOf(CsrepError);
+    await expect(scraper.fetchPlayers([STEAM_A], 0)).rejects.toMatchObject({ kind: "proxy-unreachable" });
   });
 });
 
 describe("mergeCsrepReputation & toCsrepSummary", () => {
-  it("overrides non-banned or UNKNOWN reputation to BANNED when CSRep has a ban", () => {
-    const csrep: CsrepPlayer = {
-      id: STEAM_A,
-      bans: [{ source: "STEAM", type: "VAC", starts_at: "2026-01-15T00:00:00Z" }],
+  it("overrides non-banned reputation to BANNED when bansCount > 0", () => {
+    const p: CsrepProfile = {
+      steamId: STEAM_A,
+      trustScore: 99,
+      bansCount: 1,
+      flagsCount: 0,
+      cs2Hours: 1383,
+      inventoryUsd: 701,
+      reactionMs: 543,
+      preaim: 10.9,
+      aimAccuracy: 19.4,
+      headAccuracy: 15.4,
     };
-    const merged = mergeCsrepReputation({ score: 88, tier: "TRUSTED", confidence: 0.9, reasons: [] }, csrep);
-    expect(merged).toEqual({
+    expect(mergeCsrepReputation({ score: 88, tier: "TRUSTED", confidence: 0.9, reasons: [] }, p)).toEqual({
       score: 0,
       tier: "BANNED",
       confidence: 1,
-      reasons: ["Ban on record (CSRep: STEAM VAC) since 2026-01-15"],
+      reasons: ["Ban on record (CSRep: 1 ban)"],
+    });
+    expect(toCsrepSummary(p)).toEqual({
+      trustScore: 99,
+      bansCount: 1,
+      flagsCount: 0,
+      cs2Hours: 1383,
+      inventoryUsd: 701,
     });
   });
 
-  it("preserves Leetify score/tier while appending autoflag and low CS2 hours", () => {
-    const csrep: CsrepPlayer = {
-      id: STEAM_A,
-      cs2_hours: 95,
-      autoflag: { id: "flag-1", has_snapshot: true },
-      bans: [],
+  it("preserves Leetify score/tier while appending flags, low hours, and low trust", () => {
+    const p: CsrepProfile = {
+      steamId: STEAM_A,
+      trustScore: 35,
+      bansCount: 0,
+      flagsCount: 2,
+      cs2Hours: 95,
+      inventoryUsd: null,
+      reactionMs: null,
+      preaim: null,
+      aimAccuracy: null,
+      headAccuracy: null,
     };
-    const merged = mergeCsrepReputation({ score: 72, tier: "NORMAL", confidence: 0.8, reasons: [] }, csrep);
-    expect(merged).toEqual({
+    expect(mergeCsrepReputation({ score: 72, tier: "NORMAL", confidence: 0.8, reasons: [] }, p)).toEqual({
       score: 72,
       tier: "NORMAL",
       confidence: 0.8,
-      reasons: ["CSRep autoflagged", "Low CS2 hours (95h on CSRep)"],
+      reasons: ["CSRep flagged (2)", "Low CS2 hours (95h on CSRep)", "Low CSRep trust (35%)"],
     });
-
-    const summary = toCsrepSummary(csrep);
-    expect(summary.autoflagged).toBe(true);
-    expect(summary.cs2Hours).toBe(95);
-    expect(summary.bans).toEqual([]);
   });
 });
 
-describe("settingsFileStore csrepApiKey", () => {
+describe("settingsFileStore flaresolverrUrl", () => {
   const dirs: string[] = [];
   afterEach(() => {
     for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
   });
 
-  it("encrypts and decrypts csrepApiKey using keychain", () => {
+  it("persists and loads flaresolverrUrl", () => {
     const dir = mkdtempSync(join(tmpdir(), "cs2clean-csrep-"));
     dirs.push(dir);
     const keychain: KeyCrypto = {
-      isAvailable: () => true,
-      encrypt: (s) => Buffer.from(s, "utf8").toString("base64"),
-      decrypt: (b) => Buffer.from(b, "base64").toString("utf8"),
+      isAvailable: () => false,
+      encrypt: (s) => s,
+      decrypt: (s) => s,
     };
     const store = settingsFileStore(join(dir, "settings.json"), keychain);
-    store.save({ csrepApiKey: "csrep-secret-123" });
-    expect(store.load().csrepApiKey).toBe("csrep-secret-123");
+    store.save({ flaresolverrUrl: "http://localhost:8191/v1" });
+    expect(store.load().flaresolverrUrl).toBe("http://localhost:8191/v1");
   });
 });
 
-describe("Controller CSRep integration", () => {
+describe("Controller CSRep FlareSolverr integration", () => {
   function fakeSource(): { source: GameSource; emitMatch: (m: MatchState | null) => void } {
     const emitter = new EventEmitter() as GameSource;
     emitter.kind = "steam";
@@ -151,30 +234,22 @@ describe("Controller CSRep integration", () => {
     };
   }
 
-  it("enriches lobby rows in parallel and stays non-blocking on Cloudflare 403", async () => {
-    let csrepStatus = 200;
+  it("enriches lobby rows via FlareSolverr and stays non-blocking when FlareSolverr is down", async () => {
+    let proxyDown = false;
     const fetchImpl = vi.fn(async (input: string | URL | Request) => {
       const url = String(input);
-      if (url.startsWith("https://csrep.gg/api/players")) {
-        if (csrepStatus === 403) {
-          return new Response("<html>Just a moment...</html>", {
-            status: 403,
-            headers: { "content-type": "text/html", "cf-mitigated": "challenge" },
-          });
-        }
+      if (url === "http://localhost:8191/v1") {
+        if (proxyDown) throw new Error("ECONNREFUSED");
         return jsonResponse({
-          status: "OK",
-          result: [
-            {
-              id: STEAM_A,
-              cs2_hours: 140,
-              autoflag: { id: "af-1" },
-              bans: [{ source: "STEAM", type: "VAC", starts_at: "2026-05-01T00:00:00Z" }],
-            },
-          ],
+          status: "ok",
+          solution: {
+            status: 200,
+            response: SAMPLE_CSREP_HTML,
+            cookies: [{ name: "cf_clearance", value: "tok" }],
+            userAgent: "UA",
+          },
         });
       }
-      // Leetify profile lookup returns a minimal clean profile
       return jsonResponse({
         name: "PlayerA",
         steam64_id: STEAM_A,
@@ -198,7 +273,7 @@ describe("Controller CSRep integration", () => {
     });
 
     const { source, emitMatch } = fakeSource();
-    let saved: Record<string, unknown> = { csrepApiKey: "csrep-key" };
+    let saved: Record<string, unknown> = { flaresolverrUrl: "http://localhost:8191/v1" };
     const controller = new Controller({
       version: "1.6.1",
       source,
@@ -207,9 +282,6 @@ describe("Controller CSRep integration", () => {
       fetchImpl: fetchImpl as unknown as typeof fetch,
       scrape: async () => ({ ok: false, reason: "disabled in test" }),
     });
-
-    expect(controller.csrepPlayerUrl(STEAM_A)).toBe(`https://csrep.gg/player/${STEAM_A}`);
-    expect(controller.csrepPlayerUrl("invalid")).toBeNull();
 
     controller.start();
     emitMatch({
@@ -224,18 +296,17 @@ describe("Controller CSRep integration", () => {
     expect(controller.state.csrep.reachable).toBe(true);
     expect(row.reputation?.tier).toBe("BANNED");
     expect(row.classification).toBe("VERY_HIGH");
-    expect(row.csrep?.autoflagged).toBe(true);
-    expect(row.csrep?.cs2Hours).toBe(140);
+    expect(row.csrep?.trustScore).toBe(99);
+    expect(row.csrep?.cs2Hours).toBe(1383);
 
-    // Now simulate Cloudflare 403 and re-clear cache
-    csrepStatus = 403;
-    controller.setCsrepKey("csrep-key-2");
+    proxyDown = true;
+    expect(controller.setFlaresolverrUrl("http://localhost:8191")).toBe(true);
     await vi.waitFor(() => expect(controller.state.csrep.reachable).toBe(false));
-    expect(controller.state.notice).toContain("Cloudflare");
+    expect(controller.state.notice).toContain("FlareSolverr");
     expect(controller.state.lobby.rows[0]?.status).toBe("ok");
 
-    controller.clearCsrepKey();
-    expect(controller.state.csrep.hasKey).toBe(false);
+    controller.clearFlaresolverrUrl();
+    expect(controller.state.csrep.hasProxy).toBe(false);
     controller.stop();
   });
 });

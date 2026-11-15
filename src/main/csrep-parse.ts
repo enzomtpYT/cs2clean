@@ -1,0 +1,94 @@
+// Pure HTML parser for https://csrep.gg/player/<steamId> server-side rendered pages.
+
+export interface CsrepProfile {
+  steamId: string;
+  trustScore: number | null;
+  bansCount: number;
+  flagsCount: number;
+  cs2Hours: number | null;
+  inventoryUsd: number | null;
+  reactionMs: number | null;
+  preaim: number | null;
+  aimAccuracy: number | null;
+  headAccuracy: number | null;
+}
+
+function htmlToText(html: string): string {
+  return html
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function parseNum(raw: string | undefined): number | null {
+  if (!raw) return null;
+  const n = Number(raw.replace(/,/g, ""));
+  return Number.isFinite(n) ? n : null;
+}
+
+/** Parses a rendered csrep.gg/player/<steamId> HTML document into a CsrepProfile, or null if unusable. */
+export function parseCsrepHtml(html: string, steamId: string): CsrepProfile | null {
+  if (!html || html.includes("_cf_chl_opt") || html.includes("challenges.cloudflare.com")) return null;
+  const text = htmlToText(html);
+  if (!text || /player not found/i.test(text)) return null;
+
+  const trustMatch = text.match(/Trust Score\s+(\d{1,3})%/i);
+  const trustScore = trustMatch ? parseNum(trustMatch[1]) : null;
+
+  // Header buttons appear before Stats Overview (e.g. "1 Ban 0 Flags 0 Bans").
+  const overviewIdx = text.search(/Stats Overview/i);
+  const headerSlice = overviewIdx > 0 ? text.slice(0, overviewIdx) : text.slice(0, 1200);
+  const banMatches = Array.from(headerSlice.matchAll(/\b(\d+)\s+Bans?\b/gi), (m) => Number(m[1]));
+  const bansCount = banMatches.length > 0 ? Math.max(...banMatches) : 0;
+
+  const flagMatch = headerSlice.match(/\b(\d+)\s+Flags?\b/i);
+  const flagsCount = flagMatch ? Number(flagMatch[1]) : 0;
+
+  const playtimeMatch = text.match(/Playtime\s+([\d,]+(?:\.\d+)?)\s*h\b/i);
+  const cs2Hours = parseNum(playtimeMatch?.[1]);
+
+  const invMatch = text.match(/Inventory\s+\$([\d,]+(?:\.\d+)?)/i);
+  const inventoryUsd = parseNum(invMatch?.[1]);
+
+  const ttdMatch = text.match(/Time to Damage\s+(\d+)\s*ms/i);
+  const reactionMs = parseNum(ttdMatch?.[1]);
+
+  const preaimMatch = text.match(/Preaim\s+([\d.]+)\s*°/i);
+  const preaim = parseNum(preaimMatch?.[1]);
+
+  const aimMatch = text.match(/Aim Accuracy\s+([\d.]+)\s*%/i);
+  const aimAccuracy = parseNum(aimMatch?.[1]);
+
+  const headMatch = text.match(/Head Accuracy\s+([\d.]+)\s*%/i);
+  const headAccuracy = parseNum(headMatch?.[1]);
+
+  const hasSignal =
+    trustScore !== null ||
+    cs2Hours !== null ||
+    inventoryUsd !== null ||
+    reactionMs !== null ||
+    banMatches.length > 0 ||
+    flagMatch !== null;
+  if (!hasSignal) return null;
+
+  return {
+    steamId,
+    trustScore,
+    bansCount,
+    flagsCount,
+    cs2Hours,
+    inventoryUsd,
+    reactionMs,
+    preaim,
+    aimAccuracy,
+    headAccuracy,
+  };
+}
