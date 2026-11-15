@@ -94,6 +94,42 @@ describe("settings file: what a save leaves alone", () => {
     settingsFileStore(file, keychain()).save({ siren: false, hotkeys: { cycle: "F8" } });
     expect(onDisk()).toMatchObject({ siren: false, hotkeys: { cycle: "F8" }, lastUpdateCheck: 5 });
   });
+
+  it("saves and loads overlay and siren customization fields", () => {
+    const store = settingsFileStore(file, keychain());
+    store.save({
+      siren: true,
+      sirenVolume: 0.45,
+      sirenThreshold: "very_high",
+      overlayOpacity: 0.78,
+      overlayScale: 1.15,
+      autoHideOnLive: false,
+    });
+    expect(store.load()).toMatchObject({
+      siren: true,
+      sirenVolume: 0.45,
+      sirenThreshold: "very_high",
+      overlayOpacity: 0.78,
+      overlayScale: 1.15,
+      autoHideOnLive: false,
+    });
+  });
+
+  it("ignores invalid overlay and siren customization values on load", () => {
+    writeFileSync(file, JSON.stringify({
+      sirenVolume: "loud",
+      sirenThreshold: "invalid",
+      overlayOpacity: null,
+      overlayScale: "big",
+      autoHideOnLive: 1,
+    }));
+    const loaded = settingsFileStore(file, keychain()).load();
+    expect(loaded.sirenVolume).toBeUndefined();
+    expect(loaded.sirenThreshold).toBeUndefined();
+    expect(loaded.overlayOpacity).toBeUndefined();
+    expect(loaded.overlayScale).toBeUndefined();
+    expect(loaded.autoHideOnLive).toBeUndefined();
+  });
 });
 
 describe("settings file: the update check time", () => {

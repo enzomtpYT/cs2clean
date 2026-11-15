@@ -149,6 +149,8 @@ export interface LobbyRow extends RosterPlayer {
 
 export type GameSourceKind = "steam" | "overwolf" | "replay";
 
+export type SirenThreshold = "high" | "very_high";
+
 export interface AppState {
   version: string;
   leetify: {
@@ -209,6 +211,16 @@ export interface AppState {
     focusSlot: number | null;
     /** Play a siren when a HIGH player is found in the match. */
     siren: boolean;
+    /** Siren volume from 0 to 1. */
+    sirenVolume: number;
+    /** Minimum evidence class that triggers the siren. */
+    sirenThreshold: SirenThreshold;
+    /** Overlay opacity from 0.55 to 1.0. */
+    opacity: number;
+    /** Overlay UI scale from 0.85 to 1.25. */
+    scale: number;
+    /** Automatically hide the overlay when the match transitions to live. */
+    autoHideOnLive: boolean;
   };
   /** The overlay hotkeys can be changed in Settings (the app's own overlay window; not with Overwolf). */
   hotkeysEditable: boolean;
@@ -243,6 +255,11 @@ export interface Bridge {
   /** Shows the previous player's card (the last one to start with); before the first player, hides the overlay. */
   previousPlayer(): Promise<void>;
   setSiren(on: boolean): Promise<void>;
+  setSirenVolume(volume: number): Promise<void>;
+  setSirenThreshold(threshold: SirenThreshold): Promise<void>;
+  setOverlayOpacity(opacity: number): Promise<void>;
+  setOverlayScale(scale: number): Promise<void>;
+  setAutoHideOnLive(on: boolean): Promise<void>;
   testSiren(): Promise<void>;
   /** Opens the siren ignore list (a text file of SteamIDs the siren leaves out) in the person's text editor. */
   openSirenIgnoreList(): Promise<void>;

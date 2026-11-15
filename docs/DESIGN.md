@@ -16,10 +16,11 @@ The app does not look at demos and makes no accusations. Treat a flag as "worth 
 │                      │                                      │
 │  ┌───────────────┐   │   ┌──────────────────────────────┐   │
 │  │   Controller  │───┼──►│   Desktop Window (React)     │   │
-│  │               │   │   │   - Lobby list               │   │
-│  └───────┬───────┘   │   │   - API key input            │   │
-│          │           │   │   - Settings panel           │   │
-│  ┌───────▼───────┐   │   └──────────────────────────────┘   │
+│  │               │   │   │   - Match & Lobby            │   │
+│  └───────┬───────┘   │   │   - Keys & APIs              │   │
+│          │           │   │   - Keybinds & Overlay       │   │
+│  ┌───────▼───────┐   │   │   - Settings & Status Bar    │   │
+│  │  Game Source  │   │   └──────────────────────────────┘   │
 │  │  Game Source  │   │                                      │
 │  │  (Steam/      │   │   ┌──────────────────────────────┐   │
 │  │   Overwolf/   │   │   │   Overlay Window (React)     │   │
@@ -258,14 +259,12 @@ Transparent, click-through window on top of CS2:
 
 ### Desktop Window (`src/renderer/desktop.tsx`)
 
-Full-featured window for setup and monitoring:
-- API key cards: the Leetify key (checked with Leetify before it is saved) and the optional Steam Web API key
-- Lobby list with player details, and a note when Steam lists no players (community server or offline match)
-- "Check a player" form (Steam source): add up to 5 players by SteamID64, SteamID2/3 or a Steam or Leetify profile link. They are added as "Unknown player" and named a moment later (`Controller.addPlayer` → `steam/player-name.ts`): from the Steam Web API's GetPlayerSummaries when a key is saved, else from Steam's mini-profile page; the mini-profile page also stands in when the API can't be reached or turns the key down, but not when the API answers that Steam has no such player. The name goes onto the row through `GameSource.setPlayerName`, which republishes the match. A player who is taken off the list meanwhile, or a controller that has stopped, just drops the name. Neither source knowing them leaves "Unknown player" (a row still shows Leetify's name for them).
-- Settings panel (the four hotkeys, siren toggle, test and ignore list, start with Windows, open Steam's friends list automatically, check for updates)
-- Leetify status indicator
-- csst.at fallback status: shown only when it can't be used, with the reason
-- Update banner when GitHub has a newer release
+Full-featured sidebar-navigated window (`Match`, `Keys & APIs`, `Keybinds & Overlay`, `Settings`) with a top action bar and persistent bottom status bar:
+- **Match & Lobby**: live lookup progress bar, team-grouped lobby list with player details, manual "Check a player" form (Steam source), and clear empty/community-server states
+- **Keys & APIs**: Leetify, optional Steam Web API, and optional CSRep.GG API key management with connection status badges
+- **Keybinds & Overlay**: the four overlay hotkeys with individual reset buttons and inline validation feedback, plus overlay opacity, UI scale, and auto-hide on live match toggle
+- **Settings**: desktop theme mode (`Dark` / `Light` / `System`), theme presets, custom accent color, layout density, siren volume & threshold (`High & Very High` vs `Very High Only`), ignore list shortcut, Start with Windows, auto-open Steam friends list, and inline update checker
+- **Status Bar**: continuous indicators for CS2 running state & game source, match lookup progress, `Leetify`, `csst.at` fallback, `CSRep.GG`, and `Steam` key status
 
 ## Data Flow
 
@@ -289,7 +288,13 @@ Stored in `%APPDATA%\CS2Clean` (Windows), `data` beside `CS2Clean.exe` (the port
 interface Settings {
   leetifyKey?: string | null;      // Encrypted with the OS keychain; plain text only when none is available
   steamApiKey?: string | null;     // Optional, encrypted: friendship badges, and friend names for `status`
+  csrepApiKey?: string | null;     // Optional, encrypted: CSRep.GG enrichment
   siren?: boolean;                  // Default: true
+  sirenVolume?: number;             // 0..1, Default: 0.22
+  sirenThreshold?: "high" | "very_high"; // Default: "high"
+  overlayOpacity?: number;          // 0.55..1, Default: 0.92
+  overlayScale?: number;            // 0.85..1.25, Default: 1
+  autoHideOnLive?: boolean;         // Default: true
   autoOpenFriendsList?: boolean;    // Open Steam's friends list window when needed. Default: true
   hotkeys?: Partial<Hotkeys>;       // Custom hotkeys
 }

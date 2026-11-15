@@ -1,521 +1,84 @@
-import { memo, StrictMode, useMemo, useState } from "react";
+import { StrictMode, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { DEFAULT_HOTKEYS, hotkeyFromEvent, type HotkeyName } from "../shared/hotkeys";
-import type { AppState, LobbyRow } from "../shared/types";
+import { AlertTriangle, Download, Info } from "lucide-react";
 import { bridge } from "./bridge";
-import { ChevronIcon, DISCLAIMER, Logo, mapName, SideEmblem, TrashIcon, Wordmark } from "./brand";
-import leetifyBadge from "../../assets/Leetify-Badge-White-Small.png";
-import { PlayerClass } from "./parts";
-import { GroupStack } from "./group-stack";
-import { PlayerRanks } from "./ranks";
-import { groupColor } from "./group-color";
+import { KeybindsOverlayView } from "./components/KeybindsOverlayView";
+import { KeysView } from "./components/KeysView";
+import { MatchView } from "./components/MatchView";
+import { Sidebar, type NavTab } from "./components/Sidebar";
+import { SettingsView } from "./components/SettingsView";
+import { StatusBar } from "./components/StatusBar";
+import { TopBar } from "./components/TopBar";
+import { useTheme } from "./theme";
 import { useAppState } from "./useAppState";
 import "./style.css";
 
-/** The csst.at fallback (players Leetify has no profile for) can't be used: say so, and why. Silent while it works. */
-function FallbackDot({ s }: { s: AppState }) {
-  if (s.leetify.fallback.working !== false) return null;
-  return (
-    <span className="server-dot server-bad" title={s.leetify.fallback.reason ?? undefined}>
-      <span className="dot" />csst.at fallback unavailable
-    </span>
-  );
-}
-
-function FallbackNotice({ s }: { s: AppState }) {
-  const f = s.leetify.fallback;
-  if (f.working !== false) return null;
-  return (
-    <p className="notice">
-      <strong>csst.at fallback unavailable.</strong> Players Leetify has no profile for can't be looked up there.
-      {f.reason && <> {f.reason}</>}
-    </p>
-  );
-}
-
 function App() {
   const s = useAppState();
+  const theme = useTheme();
+  const [activeTab, setActiveTab] = useState<NavTab>("match");
+
   if (!s) return null;
-  return (
-    <div className="shell">
-      <header className="topbar">
-        <div className="brand"><Logo size={26} /><Wordmark /></div>
-        <div className="status-dots"><OverlayDot s={s} /><LeetifyDot s={s} /><FallbackDot s={s} /></div>
-      </header>
-      <main className="content">
-        {s.notice && <p className="notice">{s.notice}</p>}
-        <FallbackNotice s={s} />
-        <ApiKeysCard s={s} />
-        <MatchCard s={s} />
-      </main>
-      <div className="footer-row">
-        {s.update.available && (
-          <a className="update-banner" href="#" onClick={(e) => { e.preventDefault(); bridge.openReleases(); }}
-             title="Download the latest version">
-            Update available: {s.update.remoteVersion}
-          </a>
-        )}
-        <span className="leetify-badge">
-          <button className="leetify-link" onClick={() => bridge.openLeetify()} title="Data Provided by Leetify">
-            <img src={leetifyBadge} alt="Data Provided by Leetify" />
-          </button>
-        </span>
-      </div>
-      <footer className="footer">
-        <p>{DISCLAIMER}</p>
-        
-        <SettingsPanel s={s} />
-      </footer>
-    </div>
-  );
-}
-
-function OverlayDot({ s }: { s: AppState }) {
-  if (s.overlay.mode === "none") return null;
-  const on = s.overlay.visible;
-  const label = on ? "Overlay on" : "Overlay off";
-  const tone = on ? "ok" : "pending";
-  if (s.overlay.mode === "window") {
-    return (
-      <button
-        type="button"
-        className={`server-dot server-dot-btn server-${tone}`}
-        onClick={() => bridge.toggleOverlay()}
-        title={`Click or press ${s.overlay.hotkey} to ${on ? "hide" : "show"} the in-game overlay`}
-      >
-        <span className="dot" />{label}
-      </button>
-    );
-  }
-  return (
-    <span className={`server-dot server-${tone}`} title={`In-game overlay (${s.overlay.hotkey})`}>
-      <span className="dot" />{label}
-    </span>
-  );
-}
-
-function LeetifyDot({ s }: { s: AppState }) {
-  const [tone, label] = s.leetify.reachable === null ? ["pending", "Leetify"]
-    : s.leetify.reachable ? ["ok", "Leetify online"] : ["bad", "Leetify unreachable"];
-  return (
-    <span className={`server-dot server-${tone}`} title="Player data comes from Leetify's public API">
-      <span className="dot" />{label}
-    </span>
-  );
-}
-
-// ------------------------------------------------------------------ API keys
-
-const API_KEYS_OPEN = "cs2clean.apiKeysOpen";
-
-function ApiKeysCard({ s }: { s: AppState }) {
-  const [leetifyKey, setLeetifyKey] = useState("");
-  const [steamKey, setSteamKey] = useState("");
-  const [csrepKey, setCsrepKey] = useState("");
-  const [busy, setBusy] = useState<string | null>(null);
-  // Open unless the user closed it: the choice is remembered between launches.
-  const [open, setOpen] = useState(() => {
-    try { return localStorage.getItem(API_KEYS_OPEN) !== "0"; } catch { return true; }
-  });
-
-  const saveLeetify = async () => {
-    setBusy("leetify");
-    try {
-      if (await bridge.setApiKey(leetifyKey)) setLeetifyKey("");
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const saveSteam = async () => {
-    setBusy("steam");
-    try {
-      if (await bridge.setSteamApiKey(steamKey)) setSteamKey("");
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const saveCsrep = async () => {
-    setBusy("csrep");
-    try {
-      if (await bridge.setCsrepKey(csrepKey)) setCsrepKey("");
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const toggle = () => {
-    const next = !open;
-    setOpen(next);
-    try { localStorage.setItem(API_KEYS_OPEN, next ? "1" : "0"); } catch { /* storage unavailable: it just won't be remembered */ }
-  };
 
   return (
-    <section className="card">
-      <h2 className={`collapsible${open ? "" : " collapsed"}`}>
-        <button type="button" className="collapse-toggle" aria-expanded={open} aria-controls="api-keys-body" onClick={toggle}>
-          <span>API Keys</span>
-          <ChevronIcon open={open} />
-        </button>
-      </h2>
-
-      {open && (
-        <div id="api-keys-body">
-          {s.leetify.hasKey ? (
-            <div className="account">
-              <div className="account-text">
-                <strong>Leetify API key</strong>
-                <span className="muted small">Saved. Used for every player lookup.</span>
-              </div>
-              <button className="button quiet small-button" onClick={bridge.clearApiKey}>Remove</button>
-            </div>
-          ) : (
-            <>
-              <p className="small">
-                Player classes come from Leetify's public API. It works without a key at stricter rate limits; a free key
-                from <button className="leetify-link" onClick={() => bridge.openDeveloperPage()}>leetify.com/app/developer</button> makes lookups reliable.
-              </p>
-              <div className="row">
-                <input
-                  className="key-input" type="password" autoComplete="off" spellCheck={false} placeholder="Leetify API key"
-                  value={leetifyKey} onChange={(e) => setLeetifyKey(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && leetifyKey.trim() && !busy && void saveLeetify()}
-                />
-                <button className="button primary" disabled={!leetifyKey.trim() || busy === "leetify"} onClick={() => void saveLeetify()}>
-                  {busy === "leetify" ? "Checking…" : "Save key"}
-                </button>
-              </div>
-            </>
-          )}
-
-          <hr className="key-sep" />
-
-          {s.steam.hasKey ? (
-            <div className="account">
-              <div className="account-text">
-                <strong>Steam Web API key</strong>
-                <span className="muted small">Saved. Groups friends in your lobby.</span>
-              </div>
-              <button className="button quiet small-button" onClick={bridge.clearSteamApiKey}>Remove</button>
-            </div>
-          ) : (
-            <>
-              <p className="small">
-                Groups players by Steam friendship in your lobby. Optional — get a key at
-                <button className="leetify-link" onClick={() => bridge.openSteamDeveloper()}>steamcommunity.com/dev/apikey</button>
-              </p>
-              <div className="row">
-                <input
-                  className="key-input" type="password" autoComplete="off" spellCheck={false} placeholder="Steam Web API key"
-                  value={steamKey} onChange={(e) => setSteamKey(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && steamKey.trim() && !busy && void saveSteam()}
-                />
-                <button className="button primary" disabled={!steamKey.trim() || busy === "steam"} onClick={() => void saveSteam()}>
-                  {busy === "steam" ? "Saving…" : "Save key"}
-                </button>
-              </div>
-            </>
-          )}
-
-          <hr className="key-sep" />
-
-          {s.csrep.hasKey ? (
-            <div className="account">
-              <div className="account-text">
-                <strong>CSRep.GG API key</strong>
-                <span className="muted small">
-                  {s.csrep.reachable === false
-                    ? "Saved, but CSRep.GG could not be reached."
-                    : "Saved. Enriches players with bans, autoflag, hours and ranks."}
-                </span>
-              </div>
-              <button className="button quiet small-button" onClick={bridge.clearCsrepKey}>Remove</button>
-            </div>
-          ) : (
-            <>
-              <p className="small">
-                Optional CSRep.GG enrichment (bans, autoflag, CS2 hours). Request an API key at{" "}
-                <button className="leetify-link" onClick={() => bridge.openCsrepDocs()}>csrep.gg/docs/api-reference</button>
-              </p>
-              <div className="row">
-                <input
-                  className="key-input" type="password" autoComplete="off" spellCheck={false} placeholder="CSRep.GG X-API-Key"
-                  value={csrepKey} onChange={(e) => setCsrepKey(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && csrepKey.trim() && !busy && void saveCsrep()}
-                />
-                <button className="button primary" disabled={!csrepKey.trim() || busy === "csrep"} onClick={() => void saveCsrep()}>
-                  {busy === "csrep" ? "Saving…" : "Save key"}
-                </button>
-              </div>
-            </>
-          )}
-        </div>
-      )}
-    </section>
-  );
-}
-
-// ------------------------------------------------------------------ match
-
-function MatchCard({ s }: { s: AppState }) {
-  const rows = s.lobby.rows;
-  // Players added by hand with no match behind them: a list of checked players, not "your match".
-  const checkedOnly = !s.match && rows.length > 0;
-  const title = checkedOnly ? "Checked players"
-    : s.match ? [mapName(s.match.map), modeName(s.match.mode)].filter(Boolean).join(" · ") || "Your match" : "Your match";
-  return (
-    <section className="card">
-      <div className="card-head">
-        <h2>{title}</h2>
-        {s.game.source === "replay" && <span className="tag" title="Playing a recorded session, not live data">Replay</span>}
-      </div>
-      {s.game.problem && <p className="problem small">{s.game.problem}</p>}
-      {s.game.rosterUnavailable && (
-        <p className="notice small">
-          <strong>Community server or offline match: roster unavailable.</strong> Steam doesn't list the players of
-          these, so CS2Clean can't find them by itself. Add the players you want to check below.
-        </p>
-      )}
-      {rows.length > 0 ? (
-        <>
-          {s.lobby.error && <p className="error small">{s.lobby.error}</p>}
-          {s.game.hint && <p className="muted small">{s.game.hint}</p>}
-          <LobbyTable rows={rows} />
-          {!checkedOnly && (<p className="muted small hint">
-            {s.overlay.mode === "none" ? null : (
-              <>In game, <kbd>{s.overlay.hotkey}</kbd> shows this list, <kbd>{s.overlay.detailHotkey}</kbd> the details
-                of flagged players, and <kbd>{s.overlay.cycleHotkey}</kbd> / <kbd>{s.overlay.previousHotkey}</kbd> step forward / back
-                through every player's details (yours included).
-                The overlay hides itself when the match goes live.</>
-            )}
-            {s.overlay.mode === "window" && (
-              <button className="linkish" onClick={() => bridge.toggleOverlay()}>
-                {s.overlay.visible ? "Hide overlay" : "Show overlay"}
-              </button>
-            )}
-          </p>)}
-          {s.game.source === "steam" && !checkedOnly && (
-            <p className="muted small">
-              Players come from Steam's list of people you recently played with, so teams aren't known. Only the
-              first 10 players of a lobby are looked up; players you add are always checked.
-            </p>
-          )}
-        </>
-      ) : !s.game.problem ? (
-        <div className="empty">
-          <span className={s.game.running ? "pulse" : "idle"} />
-          <p className="muted">
-            {s.game.rosterUnavailable ? "No players added yet."
-              : s.game.running ? "CS2 is running. The players appear here when a match loads." : "Waiting for CS2 to start."}
-          </p>
-        </div>
-      ) : null}
-      {s.game.source === "steam" && <AddPlayerForm />}
-    </section>
-  );
-}
-
-/** Checks one more player: a SteamID64, a SteamID2/3, or a link to their Steam or Leetify profile. */
-function AddPlayerForm() {
-  const [text, setText] = useState("");
-  const [busy, setBusy] = useState(false);
-  const add = async () => {
-    setBusy(true);
-    try {
-      if (await bridge.addPlayer(text)) setText("");
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <div className="row add-player">
-      <input
-        className="key-input" type="text" autoComplete="off" spellCheck={false}
-        placeholder="Check a player: SteamID64, or a Steam or Leetify profile link"
-        value={text} onChange={(e) => setText(e.target.value)}
-        onKeyDown={(e) => e.key === "Enter" && text.trim() && !busy && void add()}
+    <div className="app-shell">
+      <Sidebar
+        s={s}
+        activeTab={activeTab}
+        onSelectTab={setActiveTab}
+        themeMode={theme.mode}
+        onCycleTheme={theme.cycleMode}
       />
-      <button className="button primary" disabled={!text.trim() || busy} onClick={() => void add()}>
-        {busy ? "Adding…" : "Add player"}
-      </button>
-    </div>
-  );
-}
 
-function LobbyTable({ rows }: { rows: LobbyRow[] }) {
-  // How many players of the lobby are in each group of friends (the group can span both teams).
-  const { groupSizes, teams } = useMemo(() => {
-    const sizes = new Map<string, number>();
-    const ct: LobbyRow[] = [];
-    const t: LobbyRow[] = [];
-    const other: LobbyRow[] = [];
-    let hasSide = false;
-    for (const r of rows) {
-      if (r.groupId) sizes.set(r.groupId, (sizes.get(r.groupId) ?? 0) + 1);
-      if (r.side === "CT") {
-        hasSide = true;
-        ct.push(r);
-      } else if (r.side === "T") {
-        hasSide = true;
-        t.push(r);
-      } else {
-        other.push(r);
-      }
-    }
-    const grouped: [string, LobbyRow[]][] = [
-      ["Counter-Terrorists", ct],
-      ["Terrorists", t],
-      [hasSide ? "Other" : "Players", other],
-    ];
-    return { groupSizes: sizes, teams: grouped.filter(([, list]) => list.length > 0) };
-  }, [rows]);
-  return (
-    <div className="lobby">
-      {teams.map(([label, list]) => (
-        <div key={label} className="team">
-          <div className="team-label">{label}</div>
-          {list.map((r) => <LobbyLine key={r.slot} r={r} groupSize={r.groupId ? groupSizes.get(r.groupId) ?? 0 : 0} />)}
-        </div>
-      ))}
-    </div>
-  );
-}
+      <div className="main-col">
+        <TopBar s={s} activeTab={activeTab} />
 
-const LobbyLine = memo(function LobbyLine({ r, groupSize }: { r: LobbyRow; groupSize: number }) {
-  const groupStyle = r.groupId ? { borderLeftColor: groupColor(r.groupId) } : undefined;
-  return (
-    <div className={`player${r.isLocal ? " is-local" : ""}`} style={groupStyle}>
-      {r.side && <SideEmblem side={r.side} />}
-      <GroupStack size={groupSize} label={r.groupName} />
-      <button className="player-name" disabled={!r.steamId} title={r.steamId ? "View on Leetify" : undefined}
-        onClick={() => r.steamId && bridge.openPlayer(r.steamId)}>
-        {r.name}
-      </button>
-      <PlayerRanks m={r.detail?.metrics} />
-      {(r.isLocal || r.via) && (
-        <span className="player-tags">
-          {r.isLocal && <span className="you">you</span>}
-          {r.via === "profile" && <span className="group-badge" title="Found from Steam's profile page, which can be ten minutes out of date: this friend may not be in your match">maybe</span>}
-          {r.via === "manual" && <span className="group-badge" title="Added by hand">added</span>}
-        </span>
-      )}
-      <span className="row-spacer" />
-      <PlayerClass r={r} />
-      {r.csrep && (
-        <span className="player-tags">
-          {r.csrep.autoflagged && <span className="group-badge" title="Autoflagged on CSRep.GG">autoflag</span>}
-          {r.csrep.cs2Hours !== null && (
-            <span className="group-badge" title="CS2 hours reported by CSRep.GG">{Math.round(r.csrep.cs2Hours)}h</span>
-          )}
-        </span>
-      )}
-      {r.steamId && r.status !== "skipped" && (
-        <>
-          <button className="leetify-link" onClick={() => bridge.openPlayer(r.steamId!)}>View on Leetify</button>
-          <button className="leetify-link" onClick={() => bridge.openCsrepPlayer(r.steamId!)}>CSRep</button>
-        </>
-      )}
-      {r.via === "manual" && r.steamId && (
-        <button className="icon-button" title="Take this player off the list" aria-label="Remove player" onClick={() => void bridge.removePlayer(r.steamId!)}><TrashIcon /></button>
-      )}
-    </div>
-  );
-});
+        <main className="view-scroll">
+          <div className="view-container">
+            {s.update.available && (
+              <div className="banner info">
+                <div className="banner-body">
+                  <Download size={15} style={{ flexShrink: 0, marginTop: 2 }} />
+                  <span>
+                    A new version of CS2Clean (<strong>{s.update.remoteVersion}</strong>) is available.
+                  </span>
+                </div>
+                <button type="button" className="btn btn-xs btn-primary" onClick={() => void bridge.openReleases()}>
+                  Download
+                </button>
+              </div>
+            )}
 
-const modeName = (m: string | null) => (m ? m.charAt(0).toUpperCase() + m.slice(1).replace(/_/g, " ") : null);
+            {s.notice && (
+              <div className="banner warn">
+                <div className="banner-body">
+                  <Info size={15} style={{ flexShrink: 0, marginTop: 2 }} />
+                  <span>{s.notice}</span>
+                </div>
+              </div>
+            )}
 
-// ------------------------------------------------------------------ settings
+            {s.leetify.fallback.working === false && (
+              <div className="banner warn">
+                <div className="banner-body">
+                  <AlertTriangle size={15} style={{ flexShrink: 0, marginTop: 2 }} />
+                  <span>
+                    <strong>csst.at fallback unavailable.</strong> Players Leetify has no profile for cannot be looked
+                    up there.{s.leetify.fallback.reason ? ` ${s.leetify.fallback.reason}` : ""}
+                  </span>
+                </div>
+              </div>
+            )}
 
-function SettingsPanel({ s }: { s: AppState }) {
-  const isDefault = s.overlay.hotkey === DEFAULT_HOTKEYS.lobby && s.overlay.detailHotkey === DEFAULT_HOTKEYS.detail
-    && s.overlay.cycleHotkey === DEFAULT_HOTKEYS.cycle && s.overlay.previousHotkey === DEFAULT_HOTKEYS.previous;
-  return (
-    <details className="settings">
-      <summary>Settings</summary>
-      {s.hotkeysEditable && (
-        <>
-          <div className="hotkeys small">
-            <HotkeyField label="Show the player list" which="lobby" value={s.overlay.hotkey} />
-            <HotkeyField label="Show details of flagged players" which="detail" value={s.overlay.detailHotkey} />
-            <HotkeyField label="Next player's details" which="cycle" value={s.overlay.cycleHotkey} />
-            <HotkeyField label="Previous player's details" which="previous" value={s.overlay.previousHotkey} />
+            {activeTab === "match" && <MatchView s={s} />}
+            {activeTab === "keys" && <KeysView s={s} />}
+            {activeTab === "keybinds" && <KeybindsOverlayView s={s} />}
+            {activeTab === "settings" && <SettingsView s={s} theme={theme} />}
           </div>
-          <div className="row small">
-            <span className="muted">Click a key, then press the new one. While the app runs, CS2 doesn't get these keys.</span>
-            {!isDefault && <button className="button quiet small-button" onClick={() => bridge.resetHotkeys()}>Reset</button>}
-          </div>
-        </>
-      )}
-      {s.startWithWindows !== null && (
-        <label className="check small">
-          <input type="checkbox" checked={s.startWithWindows} onChange={(e) => bridge.setStartWithWindows(e.target.checked)} />
-          Start automatically with Windows, minimized
-        </label>
-      )}
-      {s.game.source === "steam" && (
-        <label className="check small">
-          <input type="checkbox" checked={s.autoOpenFriendsList} onChange={(e) => bridge.setAutoOpenFriendsList(e.target.checked)} />
-          Open Steam's friends list for me when it is closed (needs Steam's debug port, see the README)
-        </label>
-      )}
-      <div className="row small">
-        <label className="check">
-          <input type="checkbox" checked={s.overlay.siren} onChange={(e) => bridge.setSiren(e.target.checked)} />
-          Siren when a High or Very high player is in my match
-        </label>
-        <button className="button quiet small-button" onClick={() => bridge.testSiren()}>Test</button>
-        <button className="button quiet small-button" title="Players listed in siren-ignore.txt never set the siren off. One SteamID per line." onClick={() => bridge.openSirenIgnoreList()}>Ignore list</button>
+        </main>
+
+        <StatusBar s={s} />
       </div>
-      {s.overlay.mode === "window" && (
-        <p className="muted small">
-          The overlay sits on top of CS2 when the game's display mode is <b>Fullscreen Windowed</b> (Settings, Video).
-          In plain Fullscreen, Windows draws the game over it.
-        </p>
-      )}
-      <p className="muted small">
-        Version {s.version}.{" "}
-        <button className="button quiet small-button" onClick={async () => {
-          const result = await bridge.updateCheck();
-          if (result.status === "current") alert("You’re already on the latest version.");
-          else if (result.status === "failed") alert(`Couldn’t check for updates: ${result.reason}.`);
-        }}>Check for updates</button>
-      </p>
-    </details>
-  );
-}
-
-/** A hotkey button: click it, then press the new key combination (Esc cancels). */
-function HotkeyField({ label, which, value }: { label: string; which: HotkeyName; value: string }) {
-  const [listening, setListening] = useState(false);
-  const stop = () => {
-    setListening(false);
-    void bridge.pauseHotkeys(false);
-  };
-  return (
-    <div className="hotkey-row">
-      <span>{label}</span>
-      <button
-        className={`hotkey-button${listening ? " listening" : ""}`}
-        onClick={() => {
-          if (listening) return stop();
-          setListening(true);
-          void bridge.pauseHotkeys(true);
-        }}
-        onBlur={() => listening && stop()}
-        onKeyDown={(e) => {
-          if (!listening) return;
-          e.preventDefault();
-          if (e.key === "Escape") return stop();
-          const hotkey = hotkeyFromEvent(e);
-          if (!hotkey) return; // only modifiers so far, or a key we don't offer
-          setListening(false);
-          // Re-registers the hotkeys: the new pair if it's usable, the old pair if not.
-          void bridge.setHotkey(which, hotkey);
-        }}
-      >
-        {listening ? "Press a key…" : <kbd>{value}</kbd>}
-      </button>
     </div>
   );
 }

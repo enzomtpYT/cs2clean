@@ -8,7 +8,7 @@ import { isSameMatch } from "../shared/match-identity";
 import { pressViewKey } from "../shared/overlay-keys";
 import { MAX_MANUAL } from "../shared/lobby-size";
 import { parseSteamInput } from "../shared/steam-id";
-import type { AppState, LobbyRow, MatchState } from "../shared/types";
+import type { AppState, LobbyRow, MatchState, SirenThreshold } from "../shared/types";
 import type { GameSource } from "./game/source";
 import { CsrepClient, CsrepError, toCsrepSummary, type CsrepPlayer } from "./csrep";
 import { LeetifyClient, LeetifyError, lookupLobby, type DataSource, type LookupOptions } from "./leetify";
@@ -28,6 +28,16 @@ export interface Settings {
   csrepApiKey?: string | null;
   /** Siren when a HIGH player is found (default on). */
   siren?: boolean;
+  /** Siren volume from 0 to 1 (default 0.22). */
+  sirenVolume?: number;
+  /** Minimum evidence class that triggers the siren (default "high"). */
+  sirenThreshold?: SirenThreshold;
+  /** Overlay opacity from 0.55 to 1 (default 0.92). */
+  overlayOpacity?: number;
+  /** Overlay UI scale from 0.85 to 1.25 (default 1). */
+  overlayScale?: number;
+  /** Automatically hide the overlay when the match goes live (default true). */
+  autoHideOnLive?: boolean;
   /** Open Steam's friends list window when it is closed, to find friends in the match (default on). */
   autoOpenFriendsList?: boolean;
   /** Overlay hotkeys chosen in Settings (default Shift+F2, F7 and F6). */
@@ -49,7 +59,8 @@ export interface ControllerDeps {
   steamApiKey?: string | null;
   /** CSRep.GG API key from CSREP_API_KEY environment variable. */
   csrepApiKey?: string | null;
-  overlay: AppState["overlay"];
+  overlay: Omit<AppState["overlay"], "sirenVolume" | "sirenThreshold" | "opacity" | "scale" | "autoHideOnLive">
+    & Partial<Pick<AppState["overlay"], "sirenVolume" | "sirenThreshold" | "opacity" | "scale" | "autoHideOnLive">>;
   fetchImpl?: typeof fetch;
   lobby?: LobbyOptions;
   /** Requests to Leetify in flight at once. */
@@ -99,7 +110,15 @@ export class Controller extends EventEmitter<{ state: [AppState] }> {
       game: { source: deps.source.kind, running: false, problem: null, hint: null, rosterUnavailable: false },
       match: null,
       lobby: { rows: [], updatedAt: null, error: null, cycle: [] },
-      overlay: { ...deps.overlay, siren: this.settings.siren ?? true },
+      overlay: {
+        ...deps.overlay,
+        siren: this.settings.siren ?? true,
+        sirenVolume: clamp(this.settings.sirenVolume ?? deps.overlay.sirenVolume ?? 0.22, 0, 1),
+        sirenThreshold: this.settings.sirenThreshold ?? deps.overlay.sirenThreshold ?? "high",
+        opacity: clamp(this.settings.overlayOpacity ?? deps.overlay.opacity ?? 0.92, 0.55, 1),
+        scale: clamp(this.settings.overlayScale ?? deps.overlay.scale ?? 1, 0.85, 1.25),
+        autoHideOnLive: this.settings.autoHideOnLive ?? deps.overlay.autoHideOnLive ?? true,
+      },
       hotkeysEditable: !!deps.applyHotkeys,
       startWithWindows: deps.startup ? deps.startup.get() : null,
       autoOpenFriendsList: this.settings.autoOpenFriendsList ?? true,
@@ -380,6 +399,41 @@ export class Controller extends EventEmitter<{ state: [AppState] }> {
     this.update({ overlay: { ...this.state.overlay, siren: on } });
   }
 
+  setSirenVolume(volume: number): void {
+    const sirenVolume = clamp(Number.isFinite(volume) ? volume : 0.22, 0, 1);
+    this.settings = { ...this.settings, sirenVolume };
+    this.deps.store.save(this.settings);
+    this.update({ overlay: { ...this.state.overlay, sirenVolume } });
+  }
+
+  setSirenThreshold(threshold: SirenThreshold): void {
+    const sirenThreshold: SirenThreshold = threshold === "very_high" ? "very_high" : "high";
+    this.settings = { ...this.settings, sirenThreshold };
+    this.deps.store.save(this.settings);
+    this.update({ overlay: { ...this.state.overlay, sirenThreshold } });
+    this.checkAlerts();
+  }
+
+  setOverlayOpacity(opacity: number): void {
+    const clamped = clamp(Number.isFinite(opacity) ? opacity : 0.92, 0.55, 1);
+    this.settings = { ...this.settings, overlayOpacity: clamped };
+    this.deps.store.save(this.settings);
+    this.update({ overlay: { ...this.state.overlay, opacity: clamped } });
+  }
+
+  setOverlayScale(scale: number): void {
+    const clamped = clamp(Number.isFinite(scale) ? scale : 1, 0.85, 1.25);
+    this.settings = { ...this.settings, overlayScale: clamped };
+    this.deps.store.save(this.settings);
+    this.update({ overlay: { ...this.state.overlay, scale: clamped } });
+  }
+
+  setAutoHideOnLive(on: boolean): void {
+    this.settings = { ...this.settings, autoHideOnLive: on };
+    this.deps.store.save(this.settings);
+    this.update({ overlay: { ...this.state.overlay, autoHideOnLive: on } });
+  }
+
   testSiren(): void {
     this.update({ alert: { seq: this.state.alert.seq + 1, names: [] } });
   }
@@ -405,7 +459,7 @@ export class Controller extends EventEmitter<{ state: [AppState] }> {
     if (inMatch && !prev && m.phase !== "live") {
       // The lobby just appeared in warm-up: show it without a key press.
       this.state.overlay = { ...o, visible: true, view: "lobby" };
-    } else if (inMatch && m.phase === "live" && prev?.phase !== "live") {
+    } else if (inMatch && m.phase === "live" && prev?.phase !== "live" && o.autoHideOnLive) {
       // The match started: out of the way until a hotkey brings it back.
       this.state.overlay = { ...o, visible: false };
     } else if (!inMatch && prev) {
@@ -477,7 +531,13 @@ export class Controller extends EventEmitter<{ state: [AppState] }> {
    */
   private checkAlerts(): void {
     if (!this.state.match || !this.state.overlay.siren) return;
-    const flagged = this.state.lobby.rows.filter((r) => (r.classification === "HIGH" || r.classification === "VERY_HIGH") && r.steamId && !r.isLocal && !this.alerted.has(r.steamId));
+    const onlyVeryHigh = this.state.overlay.sirenThreshold === "very_high";
+    const flagged = this.state.lobby.rows.filter((r) => {
+      const matches = onlyVeryHigh
+        ? r.classification === "VERY_HIGH"
+        : r.classification === "HIGH" || r.classification === "VERY_HIGH";
+      return matches && r.steamId && !r.isLocal && !this.alerted.has(r.steamId);
+    });
     if (flagged.length === 0) return;
     // A player on the ignore list is left out and not marked as announced, so taking them off it mid-match lets the siren go off for them.
     const ignored = this.deps.sirenIgnore?.();
@@ -592,4 +652,8 @@ function numRank(v: unknown): number | null {
 
 function message(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
+}
+
+function clamp(v: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, v));
 }

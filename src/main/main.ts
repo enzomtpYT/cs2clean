@@ -263,7 +263,7 @@ function load(win: BrowserWindow, page: "index" | "overlay") {
 
 function createDesktopWindow() {
   desktop = new BrowserWindow({
-    width: 600, height: 740, minWidth: 530, minHeight: 520,
+    width: 880, height: 680, minWidth: 640, minHeight: 520,
     title: "CS2Clean", backgroundColor: "#0d1014", show: false,
     icon: join(root, "assets", "icon.png"),
     autoHideMenuBar: true,
@@ -307,6 +307,7 @@ function setupOverlay(): AppState["overlay"] {
   const base = {
     hotkey: HOTKEY.label, detailHotkey: DETAIL_HOTKEY.label, cycleHotkey: CYCLE_HOTKEY.label, previousHotkey: PREVIOUS_HOTKEY.label,
     visible: false, view: "lobby" as const, focusSlot: null, siren: true,
+    sirenVolume: 0.22, sirenThreshold: "high" as const, opacity: 0.92, scale: 1, autoHideOnLive: true,
   };
   const packages = overwolfPackages() as any;
   if (useOverwolf && packages) {
@@ -554,6 +555,19 @@ if (!app.requestSingleInstanceLock()) {
     ipcMain.handle("overlay:cycle", () => controller.cyclePlayer());
     ipcMain.handle("overlay:previous", () => controller.previousPlayer());
     ipcMain.handle("siren:set", (_e, on: unknown) => controller.setSiren(on === true));
+    ipcMain.handle("siren:set-volume", (_e, volume: unknown) => {
+      if (typeof volume === "number") controller.setSirenVolume(volume);
+    });
+    ipcMain.handle("siren:set-threshold", (_e, threshold: unknown) => {
+      if (threshold === "high" || threshold === "very_high") controller.setSirenThreshold(threshold);
+    });
+    ipcMain.handle("overlay:set-opacity", (_e, opacity: unknown) => {
+      if (typeof opacity === "number") controller.setOverlayOpacity(opacity);
+    });
+    ipcMain.handle("overlay:set-scale", (_e, scale: unknown) => {
+      if (typeof scale === "number") controller.setOverlayScale(scale);
+    });
+    ipcMain.handle("overlay:set-auto-hide", (_e, on: unknown) => controller.setAutoHideOnLive(on === true));
     ipcMain.handle("siren:test", () => controller.testSiren());
     ipcMain.handle("siren:open-ignore-list", async () => {
       if (!sirenIgnore) return;

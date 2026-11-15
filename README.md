@@ -18,13 +18,13 @@ A desktop companion and in-game overlay for CS2 that automatically checks player
 
 - **Lobby check** — when a match loads, reads the player list from Steam and looks up each player on Leetify
 - **In-game overlay** — a transparent, click-through window on top of the game showing player cards with reputation scores, classifications, and Leetify's stats (aim, clutch, positioning, accuracy, etc.). It appears automatically in warm-up and hides when the match goes live
-- **Siren alert** — plays an audible alert when a High or Very high player is detected; turn it on or off in Settings, and keep chosen players out of it with the [siren ignore list](#siren-ignore-list)
+- **Siren alert** — plays an audible alert when a High or Very high player is detected (with configurable volume, threshold, and [siren ignore list](#siren-ignore-list))
 - **Player cards** — detailed view for each player: class, reputation score, reasons for flags, and (for public profiles) recent match history
 - **Ranks at a glance** — each player's Premier rating, FACEIT level and FACEIT Elo, shown right after their name in the window, the overlay list and the player cards
 - **Stats, not accusations** — each stat is rated Low, Medium or High, and the reputation score and overall class show how unusual a player's numbers look for their rank. One strong number alone never flags a player (see [How players are rated](#how-players-are-rated))
 - **Friend badges (optional)** — with a Steam Web API key (see [API keys](#api-keys)), players in your lobby who are friends on Steam share a colored bar and group badge, in the window and in the overlay. Friendships can run through a third player (A–B and B–C make a group of three), so the badge shows who is connected, not that everyone knows everyone
 - **Friends in your match** — Steam's "played with" list does not include players from your friends list, so the app attempts to find who you're playing with using three different methods. See [Finding friends in your match](#finding-friends-in-your-match)
-- **Configurable hotkeys** — all overlay keys can be changed in Settings
+- **Configurable hotkeys & customization** — all overlay keys (with individual reset buttons), overlay opacity/scale/auto-hide, and desktop themes (Dark/Light/System, presets, custom accent, density) can be customized in the app
 - **Start with Windows** — optional auto-start, minimized to the taskbar (Windows only)
 
 The app checks for updates on startup (at most once per day). You can also trigger a manual check from Settings.
@@ -86,7 +86,7 @@ The same on Windows and Linux:
 | **F6** | Show the next player's details (one at a time) |
 | **Shift+F6** | Show the previous player's details |
 
-Stepping past either end of the list hides the card. All four keys can be changed under **Settings** in the app.
+Stepping past either end of the list hides the card. All four keys can be changed (and individually reset) under **Keybinds & Overlay** in the app.
 
 The desktop window always lists every player in your match with their name, class, reputation score and ranks. In game, **Shift+F2** shows the same list in the overlay.
 

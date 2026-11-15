@@ -21,8 +21,12 @@ function Overlay() {
   if (!s) return null;
   const o = s.overlay;
   const hints = cycleHints(s.lobby.cycle, o.focusSlot); // from the walk the keys make, not from the list on screen
+  const overlayStyle = {
+    "--ov-opacity": String(o.opacity),
+    "--ov-scale": String(o.scale),
+  } as React.CSSProperties;
   return (
-    <div className="ov">
+    <div className="ov" style={overlayStyle}>
       <header className="ov-head">
         <Logo size={18} />
         <strong>{mapName(s.match?.map) ?? "Lobby"}</strong>
@@ -50,11 +54,12 @@ function Overlay() {
 function useSiren(s: AppState | null) {
   const seen = useRef<number | null>(null);
   const seq = s?.alert.seq ?? null;
+  const volume = s?.overlay.sirenVolume ?? 0.22;
   useEffect(() => {
     if (seq === null) return;
-    if (seen.current !== null && seq > seen.current) playSiren();
+    if (seen.current !== null && seq > seen.current) playSiren(volume);
     seen.current = seq;
-  }, [seq]);
+  }, [seq, volume]);
 }
 
 /** What the overlay says while there are no players: Steam doesn't list a community server's players, so say so. */

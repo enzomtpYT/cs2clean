@@ -104,23 +104,40 @@ export class CoplayError extends Error {}
 /** k_EFriendFlagImmediate: regular friends. */
 const FRIEND_FLAG_IMMEDIATE = 0x04;
 
-/** `localSteamId`: our own Steam ID when known, to read our own rich presence too. */
-export function readCoplay(localSteamId?: string | null): CoplayResult {
-  const WIN = process.platform === "win32";
-  if (!WIN && process.platform !== "linux") throw new CoplayError("Reading Steam's players list only works on Windows and Linux.");
-  const dll = steamClientDllPath();
-  if (!dll) throw new CoplayError("Steam isn't running (or isn't signed in). Start Steam and try again.");
+type CoplayBindings = {
+  koffi: typeof import("koffi");
+  CreateInterface: (name: string, code: number[]) => unknown;
+  P: {
+    createPipe: unknown;
+    releasePipe: unknown;
+    connectUser: unknown;
+    releaseUser: unknown;
+    getFriends: unknown;
+    personaName: unknown;
+    friendName: unknown;
+    count: unknown;
+    friendAt: unknown;
+    time: unknown;
+    game: unknown;
+    friendCount: unknown;
+    friendByIndex: unknown;
+    gamePlayed: unknown;
+    presence: unknown;
+    presenceKeys: unknown;
+    presenceKey: unknown;
+  };
+};
+
+let cachedBindings: { dll: string; bindings: CoplayBindings } | null = null;
+
+function getCoplayBindings(dll: string, win: boolean): CoplayBindings {
+  if (cachedBindings && cachedBindings.dll === dll) return cachedBindings.bindings;
 
   // Loaded lazily: koffi is a native module and only needed for this.
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const koffi = require("koffi") as typeof import("koffi");
   const lib = koffi.load(dll);
   const CreateInterface = lib.func("void *CreateInterface(const char *name, _Out_ int *code)");
-
-  const client = CreateInterface(CLIENT_VERSION, [0]);
-  if (!client) throw new CoplayError("This Steam version doesn't offer the players list interface.");
-
-  const slot = (iface: unknown, index: number) => koffi.decode(koffi.decode(iface, "void *"), index * 8, "void *");
   const P = {
     createPipe: koffi.proto("int CS_CreateSteamPipe(void *self)"),
     releasePipe: koffi.proto("bool CS_BReleaseSteamPipe(void *self, int pipe)"),
@@ -131,12 +148,12 @@ export function readCoplay(localSteamId?: string | null): CoplayResult {
     friendName: koffi.proto("const char *SF_GetFriendPersonaName(void *self, uint64_t steamId)"),
     count: koffi.proto("int SF_GetCoplayFriendCount(void *self)"),
     // CSteamID results: hidden out-pointer on Windows (MSVC), plain uint64 return on Linux (see the header).
-    friendAt: WIN ? koffi.proto("void *SF_GetCoplayFriend(void *self, _Out_ uint64_t *ret, int index)")
+    friendAt: win ? koffi.proto("void *SF_GetCoplayFriend(void *self, _Out_ uint64_t *ret, int index)")
       : koffi.proto("uint64_t SF_GetCoplayFriend(void *self, int index)"),
     time: koffi.proto("int SF_GetFriendCoplayTime(void *self, uint64_t steamId)"),
     game: koffi.proto("uint32_t SF_GetFriendCoplayGame(void *self, uint64_t steamId)"),
     friendCount: koffi.proto("int SF_GetFriendCount(void *self, int flags)"),
-    friendByIndex: WIN ? koffi.proto("void *SF_GetFriendByIndex(void *self, _Out_ uint64_t *ret, int index, int flags)")
+    friendByIndex: win ? koffi.proto("void *SF_GetFriendByIndex(void *self, _Out_ uint64_t *ret, int index, int flags)")
       : koffi.proto("uint64_t SF_GetFriendByIndex(void *self, int index, int flags)"),
     // FriendGameInfo_t: CGameID (8), game IP (4), game port (2), query port (2), lobby CSteamID (8).
     gamePlayed: koffi.proto("bool SF_GetFriendGamePlayed(void *self, uint64_t steamId, void *info)"),
@@ -144,6 +161,24 @@ export function readCoplay(localSteamId?: string | null): CoplayResult {
     presenceKeys: koffi.proto("int SF_GetFriendRichPresenceKeyCount(void *self, uint64_t steamId)"),
     presenceKey: koffi.proto("const char *SF_GetFriendRichPresenceKeyByIndex(void *self, uint64_t steamId, int index)"),
   };
+  const bindings: CoplayBindings = { koffi, CreateInterface, P };
+  cachedBindings = { dll, bindings };
+  return bindings;
+}
+
+/** `localSteamId`: our own Steam ID when known, to read our own rich presence too. */
+export function readCoplay(localSteamId?: string | null): CoplayResult {
+  const WIN = process.platform === "win32";
+  if (!WIN && process.platform !== "linux") throw new CoplayError("Reading Steam's players list only works on Windows and Linux.");
+  const dll = steamClientDllPath();
+  if (!dll) throw new CoplayError("Steam isn't running (or isn't signed in). Start Steam and try again.");
+
+  const { koffi, CreateInterface, P } = getCoplayBindings(dll, WIN);
+
+  const client = CreateInterface(CLIENT_VERSION, [0]);
+  if (!client) throw new CoplayError("This Steam version doesn't offer the players list interface.");
+
+  const slot = (iface: unknown, index: number) => koffi.decode(koffi.decode(iface, "void *"), index * 8, "void *");
   const call = (iface: unknown, index: number, proto: unknown, ...args: unknown[]) =>
     koffi.call(slot(iface, index), proto as never, iface, ...args);
   /** Calls a method that returns a CSteamID and gives the Steam ID (0n when there is none). */

@@ -17,7 +17,11 @@ export interface KeyCrypto {
 }
 
 /** The entries `save` writes itself. Everything else in the file (lastUpdateCheck, say) belongs to someone else. */
-const OWN_KEYS = new Set(["leetifyKey", "leetifyKeyEnc", "steamApiKey", "steamApiKeyEnc", "csrepApiKey", "csrepApiKeyEnc", "siren", "autoOpenFriendsList", "hotkeys"]);
+const OWN_KEYS = new Set([
+  "leetifyKey", "leetifyKeyEnc", "steamApiKey", "steamApiKeyEnc", "csrepApiKey", "csrepApiKeyEnc",
+  "siren", "sirenVolume", "sirenThreshold", "overlayOpacity", "overlayScale", "autoHideOnLive",
+  "autoOpenFriendsList", "hotkeys",
+]);
 
 /** The file's entries, or none when it is missing, unreadable or not a JSON object. */
 function readRaw(file: string): Record<string, unknown> {
@@ -56,6 +60,11 @@ export function settingsFileStore(file: string, keychain: KeyCrypto): SettingsSt
           steamApiKey,
           csrepApiKey,
           siren: typeof raw.siren === "boolean" ? raw.siren : undefined,
+          sirenVolume: typeof raw.sirenVolume === "number" && Number.isFinite(raw.sirenVolume) ? raw.sirenVolume : undefined,
+          sirenThreshold: raw.sirenThreshold === "high" || raw.sirenThreshold === "very_high" ? raw.sirenThreshold : undefined,
+          overlayOpacity: typeof raw.overlayOpacity === "number" && Number.isFinite(raw.overlayOpacity) ? raw.overlayOpacity : undefined,
+          overlayScale: typeof raw.overlayScale === "number" && Number.isFinite(raw.overlayScale) ? raw.overlayScale : undefined,
+          autoHideOnLive: typeof raw.autoHideOnLive === "boolean" ? raw.autoHideOnLive : undefined,
           autoOpenFriendsList: typeof raw.autoOpenFriendsList === "boolean" ? raw.autoOpenFriendsList : undefined,
           hotkeys: raw.hotkeys && typeof raw.hotkeys === "object" && !Array.isArray(raw.hotkeys)
             ? (raw.hotkeys as Settings["hotkeys"])
@@ -66,7 +75,16 @@ export function settingsFileStore(file: string, keychain: KeyCrypto): SettingsSt
       }
     },
     save(s: Settings) {
-      const out: Record<string, unknown> = { siren: s.siren, autoOpenFriendsList: s.autoOpenFriendsList, hotkeys: s.hotkeys };
+      const out: Record<string, unknown> = {
+        siren: s.siren,
+        sirenVolume: s.sirenVolume,
+        sirenThreshold: s.sirenThreshold,
+        overlayOpacity: s.overlayOpacity,
+        overlayScale: s.overlayScale,
+        autoHideOnLive: s.autoHideOnLive,
+        autoOpenFriendsList: s.autoOpenFriendsList,
+        hotkeys: s.hotkeys,
+      };
       if (s.leetifyKey && keychain.isAvailable()) out.leetifyKeyEnc = keychain.encrypt(s.leetifyKey);
       else if (s.leetifyKey) out.leetifyKey = s.leetifyKey;
       if (s.steamApiKey && keychain.isAvailable()) out.steamApiKeyEnc = keychain.encrypt(s.steamApiKey);
