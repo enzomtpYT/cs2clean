@@ -16,9 +16,6 @@ on:
     tags: ["cs2clean-v*"]
   workflow_dispatch:
     inputs:
-      version:
-        description: "Version, e.g. 0.2.0"
-        required: true
       publish:
         description: "Create the GitHub release (untick for a build-only test run)"
         type: boolean
@@ -48,11 +45,12 @@ jobs:
 
       - name: Version
         id: version
-        env:
-          INPUT: ${{ github.event.inputs.version }}
         run: |
-          v="${INPUT:-${GITHUB_REF_NAME#cs2clean-v}}"
-          v="${v#v}"
+          v="${{ github.event.inputs.version }}"
+          if [ -z "$v" ]; then
+            v="${GITHUB_REF_NAME#cs2clean-v}"
+            v="${v#v}"
+          fi
           if ! [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "::error::Version must look like 1.2.3 (got '$v')"
             exit 1
@@ -102,11 +100,12 @@ jobs:
 
       - name: Version
         id: version
-        env:
-          INPUT: ${{ github.event.inputs.version }}
         run: |
-          v="${INPUT:-${GITHUB_REF_NAME#cs2clean-v}}"
-          v="${v#v}"
+          v="${{ github.event.inputs.version }}"
+          if [ -z "$v" ]; then
+            v="${GITHUB_REF_NAME#cs2clean-v}"
+            v="${v#v}"
+          fi
           if ! [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "::error::Version must look like 1.2.3 (got '$v')"
             exit 1
