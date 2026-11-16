@@ -105,7 +105,7 @@ export class CoplayError extends Error {}
 const FRIEND_FLAG_IMMEDIATE = 0x04;
 
 type CoplayBindings = {
-  koffi: typeof import("koffi");
+  koffi: typeof import("koffi", { with: { "resolution-mode": "import" } });
   CreateInterface: (name: string, code: number[]) => unknown;
   P: {
     createPipe: unknown;
@@ -135,7 +135,7 @@ function getCoplayBindings(dll: string, win: boolean): CoplayBindings {
 
   // Loaded lazily: koffi is a native module and only needed for this.
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const koffi = require("koffi") as typeof import("koffi");
+  const koffi = require("koffi") as typeof import("koffi", { with: { "resolution-mode": "import" } });
   const lib = koffi.load(dll);
   const CreateInterface = lib.func("void *CreateInterface(const char *name, _Out_ int *code)");
   const P = {

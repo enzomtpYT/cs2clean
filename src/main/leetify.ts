@@ -301,7 +301,8 @@ export async function lookupLobby(client: LeetifyClient, steamIds: string[], o: 
       out[i] = await one(steamIds[i]);
     }
   };
-  await Promise.all(Array.from({ length: Math.max(1, Math.min(o.concurrency ?? 6, steamIds.length)) }, worker));
+  // Concurrency tuned up to 10 to speed up lobby lookups.
+  await Promise.all(Array.from({ length: Math.max(1, Math.min(o.concurrency ?? 10, steamIds.length)) }, worker));
   if (fatal) throw fatal;
   if (steamIds.length >= FORBIDDEN_MIN_PLAYERS && forbidden === steamIds.length)
     throw new LeetifyError("invalid-key", "Leetify refused every request (HTTP 403). Check the API key and its access under Settings.", 403);
@@ -310,7 +311,8 @@ export async function lookupLobby(client: LeetifyClient, steamIds: string[], o: 
   if (notFound.length > 0) {
     const idsToScrape = notFound.map((i) => steamIds[i]);
     debug("leetify", "Hero fallback for:", idsToScrape.join(", "));
-    // The scrape takes a while (Hero and Chrome start, then a pause between players): hand over what Leetify settled first.
+    // The scrape takes a while.
+    debug("leetify", "Starting Hero fallback for:", idsToScrape.length, "players");
     const waiting = new Set(notFound);
     const early = out.filter((_, i) => !waiting.has(i));
     if (early.length > 0) {

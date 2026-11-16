@@ -2,7 +2,7 @@
   "name": "cs2clean",
   "productName": "CS2Clean",
   "private": true,
-  "version": "1.6.1",
+  "version": "1.7.0",
   "description": "CS2Clean companion app and in-game overlay for CS2. Shows the evidence class of the players in your match.",
   "author": "CS2Clean",
   "homepage": "https://github.com/papelblume/cs2clean",
@@ -35,23 +35,23 @@
   "devDependencies": {
     "@fontsource-variable/inter": "^5.3.0",
     "@fontsource/barlow-condensed": "^5.3.0",
-    "@overwolf/ow-electron": "^42.7.1",
+    "@overwolf/ow-electron": "^44.9.0",
     "@overwolf/ow-electron-packages-types": "^1.1.11",
     "@types/node": "^24.9.0",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
-    "@vitejs/plugin-react": "^5.0.0",
-    "electron": "^42.11.8",
-    "electron-builder": "^26.15.3",
+    "@vitejs/plugin-react": "^6.3.0",
+    "electron": "^45.3.3",
+    "electron-builder": "^26.18.0",
     "esbuild": "^0.28.2",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "typescript": "~5.8.0",
-    "vite": "^7.0.0",
-    "vitest": "^5.0.2"
+    "typescript": "^7.0.2",
+    "vite": "^8.3.8",
+    "vitest": "^5.1.0"
   },
   "dependencies": {
-    "koffi": "^2.16.3",
+    "koffi": "^3.3.8",
     "lucide-react": "^1.73.0"
   },
   "build": {
@@ -66,13 +66,14 @@
       "dist/**",
       "assets/**",
       "package.json",
+      "node_modules/koffi/**",
       "!**/*.map",
       "!dist/main/steam/coplay-cli.js",
       "!dist/main/steam/friends-ui-cli.js",
       "!dist/main/steam/console-status-cli.js",
       "!dist/main/leetify-cli.js",
-      "!node_modules/koffi/build/koffi/!(win32_x64|linux_x64)/**",
-      "!node_modules/koffi/{src,doc,vendor}/**"
+      "!node_modules/koffi/doc/**",
+      "!node_modules/koffi/vendor/**"
     ],
     "asarUnpack": [
       "node_modules/koffi/**",
@@ -123,5 +124,10 @@
       "description": "CS2Clean companion app and in-game overlay for CS2",
       "icon": "assets/icon.png"
     }
+  },
+  "allowScripts": {
+    "koffi@3.3.8": true,
+    "esbuild@0.28.2": true,
+    "electron-winstaller@5.4.0": true
   }
 }
