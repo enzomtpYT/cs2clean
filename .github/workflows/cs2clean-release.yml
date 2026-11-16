@@ -58,11 +58,6 @@ jobs:
           echo "version=$v" >> "$GITHUB_OUTPUT"
 
       - run: npm ci --no-audit --no-fund
-      # The csst.at fallback runs in a sidecar (hero-runtime/) with its own Node 22 and its own better-sqlite3, shipped
-      # outside app.asar as extraResources. This installs it with the Node 22 above, copies that Node next to it,
-      # bundles its CLI and runs its selftest, so the binary that gets packaged is the one that was just tested.
-      - name: Hero sidecar (Node 22 and its own better-sqlite3)
-        run: npm run hero:install
       - run: npm test
       - run: npm version "${{ steps.version.outputs.version }}" --no-git-tag-version --allow-same-version
       - run: npm run dist
@@ -113,11 +108,6 @@ jobs:
           echo "version=$v" >> "$GITHUB_OUTPUT"
 
       - run: npm ci --no-audit --no-fund
-      # The csst.at fallback runs in a sidecar (hero-runtime/) with its own Node 22 and its own better-sqlite3, shipped
-      # outside app.asar as extraResources. This installs it with the Node 22 above, copies that Node next to it,
-      # bundles its CLI and runs its selftest, so the binary that gets packaged is the one that was just tested.
-      - name: Hero sidecar (Node 22 and its own better-sqlite3)
-        run: npm run hero:install
       - run: npm test
       - run: npm version "${{ steps.version.outputs.version }}" --no-git-tag-version --allow-same-version
       - run: npm run build
