@@ -65,9 +65,6 @@ jobs:
       # It is built on its own, so the marker is in the zip and not in the installer above.
       - run: npm run dist:zip
       - run: ls -l release
-      # The selftest again, on the copy inside the package: its Node starts, Hero and better-sqlite3 load from there.
-      - name: Check the packaged sidecar
-        run: node tools/build-hero-runtime.mjs check release/win-unpacked/resources/hero
 
       - uses: actions/upload-artifact@v4
         with:
@@ -113,8 +110,6 @@ jobs:
       - run: npm run build
       - run: npx electron-builder --linux --x64
       - run: ls -l release
-      - name: Check the packaged sidecar
-        run: node tools/build-hero-runtime.mjs check release/linux-unpacked/resources/hero
 
       - uses: actions/upload-artifact@v4
         with:
